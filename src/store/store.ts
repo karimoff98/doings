@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import { tomorrow } from '../domain/dates';
 import { nextRepeatCopy } from '../domain/repeat';
+import { SCHEMA_VERSION, loadDatabase, validateDatabase } from '../domain/validate';
 import { parseListKey } from '../domain/types';
 import type {
   Area,
@@ -18,7 +19,7 @@ import type {
   Todo,
   When,
 } from '../domain/types';
-import { appStorage } from './persistence';
+import { appStorage, setStorageErrorHandler } from './persistence';
 import { createSeedDatabase, newId } from './seed';
 
 export type Theme = 'system' | 'light' | 'dark';
@@ -50,6 +51,11 @@ export interface StoreState {
   moveDialogOpen: boolean;
   shortcutsOpen: boolean;
   settingsOpen: boolean;
+  /** Set when saving or loading the database failed; shown as a banner. */
+  storageError?: string;
+  /** Notes from validation and migration of the loaded file. */
+  storageIssues: string[];
+  dismissStorageNotice: () => void;
 
   selectList: (key: ListKey) => void;
   selectTodo: (id?: Id) => void;
@@ -139,29 +145,11 @@ export interface StoreState {
 }
 
 /**
- * Files can be edited by hand or come from another version, so the shape is
- * checked before it replaces the live database.
+ * Files can be edited by hand or come from an older version, so everything goes
+ * through migration and validation before it replaces the live database.
  */
 export function parseDatabase(raw: unknown): Database | null {
-  if (!raw || typeof raw !== 'object') return null;
-  // Accept both a bare database and a full persisted snapshot.
-  const source = 'state' in raw ? (raw as { state?: { db?: unknown } }).state?.db : raw;
-  if (!source || typeof source !== 'object') return null;
-
-  const candidate = source as Partial<Database>;
-  const collections: (keyof Database)[] = ['areas', 'projects', 'headings', 'todos', 'tags'];
-  if (!collections.every((key) => Array.isArray(candidate[key]))) return null;
-  if (!candidate.todos!.every((todo) => typeof todo?.id === 'string' && 'when' in todo)) {
-    return null;
-  }
-
-  return {
-    areas: candidate.areas!,
-    projects: candidate.projects!,
-    headings: candidate.headings!,
-    todos: candidate.todos!,
-    tags: candidate.tags!,
-  };
+  return loadDatabase(raw)?.db ?? null;
 }
 
 const UNDO_LIMIT = 60;
@@ -276,6 +264,14 @@ export const useStore = create<StoreState>()(
         moveDialogOpen: false,
         shortcutsOpen: false,
         settingsOpen: false,
+        storageError: undefined,
+        storageIssues: [],
+
+        dismissStorageNotice: () =>
+          set((state) => {
+            state.storageError = undefined;
+            state.storageIssues = [];
+          }),
 
         selectList: (key) =>
           set((state) => {
@@ -853,16 +849,63 @@ export const useStore = create<StoreState>()(
       };
     }),
     {
-      name: 'things-clone.v1',
-      version: 1,
+      // Renamed from `things-clone` together with the package; the storage layer
+      // still reads the old key once and moves the data over.
+      name: 'doings.v1',
+      version: SCHEMA_VERSION,
       storage: appStorage,
       partialize: (state) => ({
         db: state.db,
         selectedList: state.selectedList,
         theme: state.theme,
       }),
+      /** Runs only when the stored version differs from the current one. */
+      migrate: (persisted, from) => {
+        const state = (persisted ?? {}) as Partial<StoreState>;
+        const loaded = loadDatabase({ version: from, db: state.db });
+        return {
+          ...state,
+          db: loaded?.db ?? createSeedDatabase(),
+          storageIssues: loaded?.issues ?? ['Файл базы не удалось разобрать, начинаем с нуля'],
+        } as Partial<StoreState>;
+      },
+      /**
+       * Every load goes through validation, not just version changes: the file
+       * lives on disk where anything could have happened to it.
+       */
+      merge: (persisted, current) => {
+        const state = (persisted ?? {}) as Partial<StoreState> & { storageIssues?: string[] };
+        if (!state.db) return { ...current, ...state };
+        // Only validation here: version steps already ran in `migrate` above.
+        const loaded = validateDatabase(state.db);
+        if (!loaded) {
+          return {
+            ...current,
+            ...state,
+            db: current.db,
+            // The previous file becomes database.json.bak on the next successful
+            // save, so it can still be recovered by hand.
+            selectedList: 'today',
+            storageError:
+              'Файл базы повреждён и не был загружен. Открыты демонстрационные данные; прежний файл сохранится рядом как database.json.bak, из него можно восстановить данные через настройки.',
+          };
+        }
+        return {
+          ...current,
+          ...state,
+          db: loaded.db,
+          // A stored list may point at a project that the file no longer has.
+          selectedList: validList(loaded.db, state.selectedList ?? current.selectedList),
+          storageIssues: [...(state.storageIssues ?? []), ...loaded.issues],
+        };
+      },
     },
   ),
 );
+
+// A failed write must be visible: silence here means losing the user's work.
+setStorageErrorHandler((message) => {
+  useStore.setState({ storageError: message });
+});
 
 exposeForDebug(useStore);

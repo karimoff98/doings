@@ -5,6 +5,7 @@ import { QuickFind } from './components/QuickFind';
 import { SettingsDialog } from './components/SettingsDialog';
 import { ShortcutsDialog } from './components/ShortcutsDialog';
 import { Sidebar } from './components/Sidebar';
+import { StorageNotice } from './components/StorageNotice';
 import { useDesktopMenu } from './hooks/useDesktopMenu';
 import { useKeyboard } from './hooks/useKeyboard';
 import { useReminders } from './hooks/useReminders';
@@ -58,6 +59,7 @@ export function App() {
       <MoveDialog />
       <ShortcutsDialog />
       <SettingsDialog />
+      <StorageNotice />
     </div>
   );
 }

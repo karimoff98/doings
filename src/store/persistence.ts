@@ -4,6 +4,41 @@ import type { StateStorage } from 'zustand/middleware';
 /** How long we wait after the last change before touching the disk. */
 const WRITE_DELAY_MS = 250;
 
+/** Keys used before the app was renamed from `things-clone` to `doings`. */
+const LEGACY_KEYS = ['things-clone.v1'];
+
+type ErrorHandler = (message: string) => void;
+
+let reportError: ErrorHandler = () => {};
+
+/**
+ * The store registers a handler here after it is created. A failed write has to
+ * reach the user, otherwise the app silently stops saving.
+ */
+export function setStorageErrorHandler(handler: ErrorHandler): void {
+  reportError = handler;
+}
+
+function legacyValue(name: string): string | null {
+  try {
+    for (const key of [name, ...LEGACY_KEYS]) {
+      const value = globalThis.localStorage?.getItem(key);
+      if (value) return value;
+    }
+  } catch {
+    // Storage may be unavailable; nothing to migrate then.
+  }
+  return null;
+}
+
+function dropLegacy(): void {
+  try {
+    for (const key of LEGACY_KEYS) globalThis.localStorage?.removeItem(key);
+  } catch {
+    // Ignore: failing to clean up the old key is harmless.
+  }
+}
+
 /**
  * Desktop builds keep the database in a JSON file under the app's user data
  * directory. Writes are debounced, and flushed whenever the window is about to
@@ -16,13 +51,26 @@ function fileStorage(): StateStorage | null {
   let pending: string | null = null;
   let timer: number | undefined;
 
+  const write = async (json: string) => {
+    try {
+      const ok = await api.save(json);
+      if (!ok) {
+        reportError(
+          'Не удалось сохранить базу на диск. Проверьте свободное место и права доступа.',
+        );
+      }
+    } catch (error) {
+      reportError(`Не удалось сохранить базу: ${String(error)}`);
+    }
+  };
+
   const flush = () => {
     if (pending === null) return;
     const json = pending;
     pending = null;
     if (timer) window.clearTimeout(timer);
     timer = undefined;
-    void api.save(json);
+    void write(json);
   };
 
   window.addEventListener('pagehide', flush);
@@ -33,13 +81,18 @@ function fileStorage(): StateStorage | null {
 
   return {
     async getItem(name) {
-      const stored = await api.load();
-      if (stored) return stored;
-      // Databases created before the switch still live in localStorage.
-      const legacy = localStorage.getItem(name);
+      try {
+        const stored = await api.load();
+        if (stored) return stored;
+      } catch (error) {
+        reportError(`Не удалось прочитать базу: ${String(error)}`);
+        return null;
+      }
+      // Databases created before the switch to a file still live in localStorage.
+      const legacy = legacyValue(name);
       if (legacy) {
-        await api.save(legacy);
-        localStorage.removeItem(name);
+        await write(legacy);
+        dropLegacy();
         return legacy;
       }
       return null;
@@ -51,7 +104,7 @@ function fileStorage(): StateStorage | null {
     },
     removeItem() {
       pending = null;
-      void api.save('');
+      void write('');
     },
   };
 }
@@ -76,7 +129,7 @@ function memoryStorage(): StateStorage {
  */
 function browserStorage(): StateStorage {
   try {
-    const probe = '__things_probe__';
+    const probe = '__doings_probe__';
     globalThis.localStorage.setItem(probe, '1');
     globalThis.localStorage.removeItem(probe);
   } catch {
@@ -85,8 +138,16 @@ function browserStorage(): StateStorage {
   }
 
   return {
-    getItem: (name) => globalThis.localStorage.getItem(name),
-    setItem: (name, value) => globalThis.localStorage.setItem(name, value),
+    getItem: (name) => legacyValue(name),
+    setItem: (name, value) => {
+      try {
+        globalThis.localStorage.setItem(name, value);
+        dropLegacy();
+      } catch (error) {
+        // Usually the quota: tell the user instead of losing changes quietly.
+        reportError(`Не удалось сохранить данные в браузере: ${String(error)}`);
+      }
+    },
     removeItem: (name) => globalThis.localStorage.removeItem(name),
   };
 }

@@ -245,13 +245,21 @@ describe('импорт базы', () => {
     expect(parseDatabase(store().db)?.todos.length).toBe(store().db.todos.length);
   });
 
-  it('отбрасывает мусор', () => {
+  it('отбрасывает то, что базой не является', () => {
     expect(parseDatabase(null)).toBeNull();
     expect(parseDatabase({ todos: 'нет' })).toBeNull();
     expect(parseDatabase({ areas: [], projects: [], headings: [], tags: [] })).toBeNull();
-    expect(
-      parseDatabase({ areas: [], projects: [], headings: [], tags: [], todos: [{ id: 1 }] }),
-    ).toBeNull();
+  });
+
+  it('битую запись выбрасывает, а базу загружает', () => {
+    const db = parseDatabase({
+      areas: [],
+      projects: [],
+      headings: [],
+      tags: [],
+      todos: [{ id: 1 }, { id: 'td_ok', title: 'Целая' }],
+    });
+    expect(db?.todos.map((todo) => todo.title)).toEqual(['Целая']);
   });
 
   it('заменяет данные и уводит из исчезнувшего списка', () => {

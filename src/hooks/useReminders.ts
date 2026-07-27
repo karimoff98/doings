@@ -3,7 +3,7 @@ import { today } from '../domain/dates';
 import type { Todo } from '../domain/types';
 import { useStore } from '../store/store';
 
-const FIRED_KEY = 'things-clone.reminders-fired';
+const FIRED_KEY = 'doings.reminders-fired';
 const CHECK_INTERVAL_MS = 30_000;
 const STALE_AFTER_MINUTES = 30;
 

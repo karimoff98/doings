@@ -117,6 +117,38 @@ function databasePath() {
   return path.join(app.getPath('userData'), 'database.json');
 }
 
+/** Data directories used by earlier builds, before the app was renamed. */
+const LEGACY_APP_DIRS = ['things-clone'];
+
+/**
+ * Electron derives the user data directory from the package name, so renaming
+ * the package moves the app to a fresh empty folder. Carry the old database
+ * over once, before anything tries to read it.
+ */
+async function migrateUserData() {
+  const target = databasePath();
+  try {
+    await fs.access(target);
+    return; // Already migrated or a normal start.
+  } catch {
+    // No database yet: look for one left by an earlier name.
+  }
+
+  for (const dir of LEGACY_APP_DIRS) {
+    const source = path.join(app.getPath('appData'), dir, 'database.json');
+    try {
+      const json = await fs.readFile(source, 'utf8');
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.writeFile(target, json, 'utf8');
+      // The old copy stays put as a safety net; it is small and harmless.
+      console.log(`База перенесена из ${source}`);
+      return;
+    } catch (error) {
+      if (error.code !== 'ENOENT') console.error('Перенос базы не удался:', error);
+    }
+  }
+}
+
 ipcMain.handle('storage:load', async () => {
   const file = databasePath();
   try {
@@ -299,7 +331,8 @@ if (!app.requestSingleInstanceLock()) {
     }
   });
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
+    await migrateUserData();
     buildMenu();
     createWindow();
     createQuickWindow();
