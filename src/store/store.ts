@@ -19,7 +19,7 @@ import type {
   Todo,
   When,
 } from '../domain/types';
-import { appStorage, setStorageErrorHandler } from './persistence';
+import { appStorage, blockWrites, setStorageErrorHandler } from './persistence';
 import { createSeedDatabase, newId } from './seed';
 
 export type Theme = 'system' | 'light' | 'dark';
@@ -53,6 +53,8 @@ export interface StoreState {
   settingsOpen: boolean;
   /** Set when saving or loading the database failed; shown as a banner. */
   storageError?: string;
+  /** Hydration ended with an error: the app must still render something. */
+  hydrationFailed: boolean;
   /** Notes from validation and migration of the loaded file. */
   storageIssues: string[];
   dismissStorageNotice: () => void;
@@ -145,11 +147,13 @@ export interface StoreState {
 }
 
 /**
- * Files can be edited by hand or come from an older version, so everything goes
- * through migration and validation before it replaces the live database.
+ * Files can be edited by hand or come from another version, so everything goes
+ * through the version check, migration and validation before it replaces the
+ * live database.
  */
 export function parseDatabase(raw: unknown): Database | null {
-  return loadDatabase(raw)?.db ?? null;
+  const outcome = loadDatabase(raw);
+  return outcome.ok ? outcome.db : null;
 }
 
 const UNDO_LIMIT = 60;
@@ -266,6 +270,7 @@ export const useStore = create<StoreState>()(
         settingsOpen: false,
         storageError: undefined,
         storageIssues: [],
+        hydrationFailed: false,
 
         dismissStorageNotice: () =>
           set((state) => {
@@ -862,12 +867,30 @@ export const useStore = create<StoreState>()(
       /** Runs only when the stored version differs from the current one. */
       migrate: (persisted, from) => {
         const state = (persisted ?? {}) as Partial<StoreState>;
+
+        if (from > SCHEMA_VERSION) {
+          // A file from a newer app knows fields this build would silently drop.
+          const message =
+            `База сделана более новой версией приложения (схема ${from}, здесь ${SCHEMA_VERSION}). ` +
+            'Файл не открыт и не будет перезаписан — обновите приложение.';
+          blockWrites(message);
+          return {
+            selectedList: 'today',
+            theme: state.theme,
+            storageError: message,
+          } as unknown as Partial<StoreState>;
+        }
+
         const loaded = loadDatabase({ version: from, db: state.db });
-        return {
-          ...state,
-          db: loaded?.db ?? createSeedDatabase(),
-          storageIssues: loaded?.issues ?? ['Файл базы не удалось разобрать, начинаем с нуля'],
-        } as Partial<StoreState>;
+        if (!loaded.ok) {
+          return {
+            ...state,
+            db: createSeedDatabase(),
+            selectedList: 'today',
+            storageError: 'Файл базы не удалось разобрать, открыты демонстрационные данные.',
+          } as unknown as Partial<StoreState>;
+        }
+        return { ...state, db: loaded.db, storageIssues: loaded.issues } as Partial<StoreState>;
       },
       /**
        * Every load goes through validation, not just version changes: the file
@@ -875,6 +898,8 @@ export const useStore = create<StoreState>()(
        */
       merge: (persisted, current) => {
         const state = (persisted ?? {}) as Partial<StoreState> & { storageIssues?: string[] };
+        // No database in the snapshot: either a first run, or `migrate` refused
+        // to open the file and only passed the message through.
         if (!state.db) return { ...current, ...state };
         // Only validation here: version steps already ran in `migrate` above.
         const loaded = validateDatabase(state.db);
@@ -898,6 +923,17 @@ export const useStore = create<StoreState>()(
           selectedList: validList(loaded.db, state.selectedList ?? current.selectedList),
           storageIssues: [...(state.storageIssues ?? []), ...loaded.issues],
         };
+      },
+      /**
+       * zustand leaves `hasHydrated` false when hydration throws, so without
+       * this the window would stay on the loading screen forever.
+       */
+      onRehydrateStorage: () => (_state, error) => {
+        if (!error) return;
+        useStore.setState({
+          hydrationFailed: true,
+          storageError: `Не удалось загрузить сохранённые данные: ${String(error)}`,
+        });
       },
     },
   ),

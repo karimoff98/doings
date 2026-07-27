@@ -26,7 +26,7 @@
     "lint:fix": "oxlint --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "verify": "tsc --noEmit && oxlint --deny-warnings && vitest run",
+    "verify": "tsc --noEmit && oxlint --deny-warnings && prettier --check . && vitest run",
     "icons": "node scripts/make-icons.mjs",
     "desktop": "VITE_DEV_SERVER_URL=http://localhost:5273 electron .",
     "desktop:preview": "npm run build && electron .",

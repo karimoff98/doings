@@ -51,8 +51,23 @@ function optionalId(value: unknown): string | undefined {
   return typeof value === 'string' && value ? value : undefined;
 }
 
+/** `yyyy-MM-dd` that really exists in the calendar: 2026-99-99 is not a day. */
 function isoDay(value: unknown): string | undefined {
-  return typeof value === 'string' && ISO_DAY.test(value) ? value : undefined;
+  if (typeof value !== 'string' || !ISO_DAY.test(value)) return undefined;
+  const [year, month, day] = value.split('-').map(Number);
+  const probe = new Date(Date.UTC(year, month - 1, day));
+  const exists =
+    probe.getUTCFullYear() === year &&
+    probe.getUTCMonth() === month - 1 &&
+    probe.getUTCDate() === day;
+  return exists ? value : undefined;
+}
+
+/** `HH:mm` inside a real clock: 47:80 is not a time. */
+function clockTime(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !HH_MM.test(value)) return undefined;
+  const [hours, minutes] = value.split(':').map(Number);
+  return hours <= 23 && minutes <= 59 ? value : undefined;
 }
 
 function timestamp(value: unknown): string {
@@ -61,9 +76,7 @@ function timestamp(value: unknown): string {
 
 function when(value: unknown): When {
   if (!isRecord(value)) return { kind: 'unscheduled' };
-  const kind = WHEN_KINDS.has(value.kind as WhenKind)
-    ? (value.kind as WhenKind)
-    : 'unscheduled';
+  const kind = WHEN_KINDS.has(value.kind as WhenKind) ? (value.kind as WhenKind) : 'unscheduled';
   if (kind !== 'scheduled') return { kind };
   const date = isoDay(value.date);
   // A scheduled item without a valid day cannot be placed on the timeline.
@@ -184,8 +197,7 @@ export function validateDatabase(raw: unknown): ValidationResult | null {
     headingId: optionalId(row.headingId),
     when: when(row.when),
     deadline: isoDay(row.deadline),
-    reminder:
-      typeof row.reminder === 'string' && HH_MM.test(row.reminder) ? row.reminder : undefined,
+    reminder: clockTime(row.reminder),
     repeat: repeat(row.repeat),
     seriesId: optionalId(row.seriesId),
     tagIds: tagIds(row.tagIds),
@@ -246,12 +258,14 @@ export function extractDatabase(raw: unknown): unknown {
   return raw;
 }
 
-/** Schema version of a file, defaulting to 0 for anything written before versioning. */
+/**
+ * Schema version of a file, defaulting to 0 for anything written before
+ * versioning existed. Both the export format and the persisted snapshot keep it
+ * at the top level.
+ */
 export function schemaVersionOf(raw: unknown): number {
   if (!isRecord(raw)) return 0;
-  if (typeof raw.version === 'number') return raw.version;
-  if (isRecord(raw.state) && typeof raw.version === 'number') return raw.version;
-  return 0;
+  return typeof raw.version === 'number' ? raw.version : 0;
 }
 
 type Migration = (db: Database) => Database;
@@ -294,12 +308,23 @@ export function migrateDatabase(
   return { db: result, steps };
 }
 
-/** One call for the whole pipeline: unwrap, migrate, validate. */
-export function loadDatabase(raw: unknown): { db: Database; issues: string[] } | null {
+export type LoadOutcome =
+  | { ok: true; db: Database; issues: string[] }
+  | { ok: false; reason: 'invalid' }
+  /** Written by a newer app: normalising it here would strip fields we do not know. */
+  | { ok: false; reason: 'newer'; version: number };
+
+/** One call for the whole pipeline: check version, unwrap, migrate, validate. */
+export function loadDatabase(raw: unknown): LoadOutcome {
+  const version = schemaVersionOf(raw);
+  if (version > SCHEMA_VERSION) return { ok: false, reason: 'newer', version };
+
   const validated = validateDatabase(raw);
-  if (!validated) return null;
-  const { db, steps } = migrateDatabase(validated.db, schemaVersionOf(raw));
+  if (!validated) return { ok: false, reason: 'invalid' };
+
+  const { db, steps } = migrateDatabase(validated.db, version);
   return {
+    ok: true,
     db,
     issues: steps.length
       ? [...validated.issues, `Схема обновлена до версии ${SCHEMA_VERSION}`]

@@ -40,5 +40,13 @@ contextBridge.exposeInMainWorld('desktop', {
     import() {
       return ipcRenderer.invoke('storage:import');
     },
+    /** Contents of the automatic backup written beside the database. */
+    loadBackup() {
+      return ipcRenderer.invoke('storage:load-backup');
+    },
+    /** Moves an unreadable database aside and resolves to its new path. */
+    quarantine() {
+      return ipcRenderer.invoke('storage:quarantine');
+    },
   },
 });

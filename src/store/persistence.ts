@@ -9,7 +9,14 @@ const LEGACY_KEYS = ['things-clone.v1'];
 
 type ErrorHandler = (message: string) => void;
 
-let reportError: ErrorHandler = () => {};
+let reportError: ErrorHandler | null = null;
+const queuedErrors: string[] = [];
+
+/** Storage runs before the store exists, so early messages wait in a queue. */
+function report(message: string): void {
+  if (reportError) reportError(message);
+  else queuedErrors.push(message);
+}
 
 /**
  * The store registers a handler here after it is created. A failed write has to
@@ -17,6 +24,28 @@ let reportError: ErrorHandler = () => {};
  */
 export function setStorageErrorHandler(handler: ErrorHandler): void {
   reportError = handler;
+  for (const message of queuedErrors.splice(0)) handler(message);
+}
+
+let writesBlocked: string | null = null;
+
+/**
+ * Refusing to write is the only way to protect a file we could not understand,
+ * for example one written by a newer version of the app.
+ */
+export function blockWrites(reason: string): void {
+  writesBlocked = reason;
+}
+
+/** Text that survives `JSON.parse`, or null. Guards against a truncated file. */
+function readableJson(text: string | null): string | null {
+  if (!text) return null;
+  try {
+    JSON.parse(text);
+    return text;
+  } catch {
+    return null;
+  }
 }
 
 function legacyValue(name: string): string | null {
@@ -52,15 +81,17 @@ function fileStorage(): StateStorage | null {
   let timer: number | undefined;
 
   const write = async (json: string) => {
+    if (writesBlocked) {
+      report(writesBlocked);
+      return;
+    }
     try {
       const ok = await api.save(json);
       if (!ok) {
-        reportError(
-          'Не удалось сохранить базу на диск. Проверьте свободное место и права доступа.',
-        );
+        report('Не удалось сохранить базу на диск. Проверьте свободное место и права доступа.');
       }
     } catch (error) {
-      reportError(`Не удалось сохранить базу: ${String(error)}`);
+      report(`Не удалось сохранить базу: ${String(error)}`);
     }
   };
 
@@ -79,17 +110,52 @@ function fileStorage(): StateStorage | null {
     if (document.visibilityState === 'hidden') flush();
   });
 
+  /** A file that is not JSON at all: try the backup, then set it aside. */
+  const rescue = async (): Promise<string | null> => {
+    let backup: string | null = null;
+    try {
+      backup = (await api.loadBackup?.()) ?? null;
+    } catch {
+      backup = null;
+    }
+    const usable = readableJson(backup);
+    if (usable) {
+      report('Файл базы был повреждён, данные восстановлены из резервной копии.');
+      return usable;
+    }
+
+    let quarantined: string | null = null;
+    try {
+      quarantined = (await api.quarantine?.()) ?? null;
+    } catch {
+      quarantined = null;
+    }
+    report(
+      quarantined
+        ? `Файл базы не читается. Он отложен в ${quarantined}, приложение открыто с демонстрационными данными — испорченный файл можно попробовать починить и загрузить через настройки.`
+        : 'Файл базы не читается, приложение открыто с демонстрационными данными.',
+    );
+    return null;
+  };
+
   return {
     async getItem(name) {
+      let stored: string | null = null;
       try {
-        const stored = await api.load();
-        if (stored) return stored;
+        stored = await api.load();
       } catch (error) {
-        reportError(`Не удалось прочитать базу: ${String(error)}`);
+        report(`Не удалось прочитать базу: ${String(error)}`);
         return null;
       }
+
+      if (stored) {
+        // Broken JSON must never reach zustand: it would abort hydration and
+        // leave the window empty.
+        return readableJson(stored) ?? (await rescue());
+      }
+
       // Databases created before the switch to a file still live in localStorage.
-      const legacy = legacyValue(name);
+      const legacy = readableJson(legacyValue(name));
       if (legacy) {
         await write(legacy);
         dropLegacy();
@@ -138,14 +204,25 @@ function browserStorage(): StateStorage {
   }
 
   return {
-    getItem: (name) => legacyValue(name),
+    getItem: (name) => {
+      const stored = legacyValue(name);
+      const usable = readableJson(stored);
+      if (stored && !usable) {
+        report('Сохранённые данные в браузере повреждены, открыты демонстрационные данные.');
+      }
+      return usable;
+    },
     setItem: (name, value) => {
+      if (writesBlocked) {
+        report(writesBlocked);
+        return;
+      }
       try {
         globalThis.localStorage.setItem(name, value);
         dropLegacy();
       } catch (error) {
         // Usually the quota: tell the user instead of losing changes quietly.
-        reportError(`Не удалось сохранить данные в браузере: ${String(error)}`);
+        report(`Не удалось сохранить данные в браузере: ${String(error)}`);
       }
     },
     removeItem: (name) => globalThis.localStorage.removeItem(name),

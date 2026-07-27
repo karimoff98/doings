@@ -1,5 +1,5 @@
+import { SCHEMA_VERSION, loadDatabase } from '../domain/validate';
 import type { Database } from '../domain/types';
-import { parseDatabase } from './store';
 
 export interface BackupResult {
   ok: boolean;
@@ -15,7 +15,7 @@ function fileName(): string {
  * native save dialog; the browser falls back to a download.
  */
 export async function exportDatabase(db: Database): Promise<BackupResult> {
-  const json = JSON.stringify({ version: 1, db }, null, 2);
+  const json = JSON.stringify({ version: SCHEMA_VERSION, db }, null, 2);
   const native = window.desktop?.storage;
 
   if (native) {
@@ -67,11 +67,23 @@ export async function pickDatabase(): Promise<{ db?: Database; message: string }
 
   if (!text) return { message: 'Импорт отменён' };
 
+  let raw: unknown;
   try {
-    const db = parseDatabase(JSON.parse(text));
-    if (!db) return { message: 'Файл не похож на базу приложения' };
-    return { db, message: `Загружено задач: ${db.todos.length}` };
+    raw = JSON.parse(text);
   } catch {
-    return { message: 'Не удалось прочитать JSON' };
+    return { message: 'Файл не является JSON' };
   }
+
+  const outcome = loadDatabase(raw);
+  if (!outcome.ok) {
+    return {
+      message:
+        outcome.reason === 'newer'
+          ? `Файл сделан более новой версией приложения (схема ${outcome.version}). Обновите приложение, чтобы открыть его.`
+          : 'Файл не похож на базу приложения',
+    };
+  }
+
+  const notes = outcome.issues.length ? ` (${outcome.issues.join('; ')})` : '';
+  return { db: outcome.db, message: `Загружено задач: ${outcome.db.todos.length}${notes}` };
 }

@@ -13,6 +13,10 @@ interface DesktopBridge {
     export: (json: string) => Promise<string | null>;
     /** Resolves to the file contents, or null when the user cancelled. */
     import: () => Promise<string | null>;
+    /** Automatic backup written beside the database, if any. */
+    loadBackup?: () => Promise<string | null>;
+    /** Moves an unreadable database aside; resolves to its new path. */
+    quarantine?: () => Promise<string | null>;
   };
 }
 

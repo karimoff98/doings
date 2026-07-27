@@ -123,8 +123,10 @@ describe('validateDatabase: починка данных', () => {
 describe('loadDatabase: миграции схемы', () => {
   it('файл без версии проходит миграцию и сообщает об этом', () => {
     const loaded = loadDatabase({ ...empty, todos: [{ id: 'td_1', title: 'Старая' }] });
-    expect(loaded!.db.todos[0].checklist).toEqual([]);
-    expect(loaded!.issues.join(' ')).toContain(`версии ${SCHEMA_VERSION}`);
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    expect(loaded.db.todos[0].checklist).toEqual([]);
+    expect(loaded.issues.join(' ')).toContain(`версии ${SCHEMA_VERSION}`);
   });
 
   it('файл текущей версии не переписывается миграциями', () => {
@@ -132,10 +134,61 @@ describe('loadDatabase: миграции схемы', () => {
       version: SCHEMA_VERSION,
       db: { ...empty, todos: [{ id: 'td_1', title: 'Свежая' }] },
     });
-    expect(loaded!.issues.join(' ')).not.toContain('Схема обновлена');
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    expect(loaded.issues.join(' ')).not.toContain('Схема обновлена');
   });
 
   it('мусор не проходит', () => {
-    expect(loadDatabase({ todos: 'нет' })).toBeNull();
+    expect(loadDatabase({ todos: 'нет' })).toEqual({ ok: false, reason: 'invalid' });
+  });
+
+  it('файл более новой схемы не открывается', () => {
+    const outcome = loadDatabase({
+      version: SCHEMA_VERSION + 1,
+      db: { ...empty, todos: [{ id: 'td_1', title: 'Из будущего' }] },
+    });
+    // Нормализовать его нельзя: неизвестные поля потерялись бы при сохранении.
+    expect(outcome).toEqual({ ok: false, reason: 'newer', version: SCHEMA_VERSION + 1 });
+  });
+});
+
+describe('validateDatabase: строгие даты и время', () => {
+  it('несуществующие даты отбрасываются', () => {
+    const result = validateDatabase({
+      ...empty,
+      todos: [
+        { id: 'td_1', deadline: '2026-99-99' },
+        { id: 'td_2', deadline: '2026-02-30' },
+        { id: 'td_3', deadline: '2026-02-28' },
+        { id: 'td_4', when: { kind: 'scheduled', date: '2026-13-01' } },
+      ],
+    });
+    const [a, b, c, d] = result!.db.todos;
+    expect(a.deadline).toBeUndefined();
+    expect(b.deadline).toBeUndefined();
+    expect(c.deadline).toBe('2026-02-28');
+    expect(d.when).toEqual({ kind: 'unscheduled' });
+  });
+
+  it('29 февраля проходит только в высокосный год', () => {
+    const leap = validateDatabase({ ...empty, todos: [{ id: 'td_1', deadline: '2028-02-29' }] });
+    const plain = validateDatabase({ ...empty, todos: [{ id: 'td_1', deadline: '2026-02-29' }] });
+    expect(leap!.db.todos[0].deadline).toBe('2028-02-29');
+    expect(plain!.db.todos[0].deadline).toBeUndefined();
+  });
+
+  it('время вне циферблата отбрасывается', () => {
+    const result = validateDatabase({
+      ...empty,
+      todos: [
+        { id: 'td_1', reminder: '47:80' },
+        { id: 'td_2', reminder: '24:00' },
+        { id: 'td_3', reminder: '23:59' },
+        { id: 'td_4', reminder: '00:00' },
+      ],
+    });
+    const reminders = result!.db.todos.map((todo) => todo.reminder);
+    expect(reminders).toEqual([undefined, undefined, '23:59', '00:00']);
   });
 });

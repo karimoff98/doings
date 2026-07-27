@@ -31,15 +31,24 @@ function useTheme() {
  * Reading the database from disk is asynchronous, so the first paint has to wait:
  * otherwise the seed data would flash before the real lists arrive.
  */
+/** Last resort in case hydration neither finishes nor reports an error. */
+const HYDRATION_TIMEOUT_MS = 4000;
+
 function useHydrated(): boolean {
   const [hydrated, setHydrated] = useState(() => useStore.persist.hasHydrated());
+  const failed = useStore((s) => s.hydrationFailed);
 
   useEffect(() => {
     if (hydrated) return;
-    return useStore.persist.onFinishHydration(() => setHydrated(true));
+    const stop = useStore.persist.onFinishHydration(() => setHydrated(true));
+    const timer = window.setTimeout(() => setHydrated(true), HYDRATION_TIMEOUT_MS);
+    return () => {
+      stop();
+      window.clearTimeout(timer);
+    };
   }, [hydrated]);
 
-  return hydrated;
+  return hydrated || failed;
 }
 
 export function App() {

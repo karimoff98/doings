@@ -188,6 +188,31 @@ ipcMain.handle('storage:save', async (_event, json) => {
 
 ipcMain.handle('storage:path', () => databasePath());
 
+ipcMain.handle('storage:load-backup', async () => {
+  try {
+    return await fs.readFile(`${databasePath()}.bak`, 'utf8');
+  } catch {
+    return null;
+  }
+});
+
+/**
+ * Renames an unreadable database instead of letting the app overwrite it, so a
+ * broken file can still be repaired by hand later.
+ */
+ipcMain.handle('storage:quarantine', async () => {
+  const file = databasePath();
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const target = `${file}.corrupt-${stamp}.json`;
+  try {
+    await fs.rename(file, target);
+    return target;
+  } catch (error) {
+    console.error('Не удалось отложить повреждённый файл:', error);
+    return null;
+  }
+});
+
 ipcMain.handle('storage:export', async (_event, json) => {
   if (typeof json !== 'string' || !json) return null;
   const stamp = new Date().toISOString().slice(0, 10);
