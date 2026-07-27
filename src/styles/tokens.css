@@ -1,0 +1,84 @@
+:root {
+  --font-ui:
+    -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial,
+    sans-serif;
+
+  --size-row: 14px;
+  --size-meta: 11.5px;
+  --size-title: 25px;
+  --size-section: 12.5px;
+
+  --radius-row: 6px;
+  --radius-card: 9px;
+  --radius-check: 4.5px;
+
+  --sidebar-width: 268px;
+  --content-max: 700px;
+
+  --dur-fast: 110ms;
+  --dur-med: 200ms;
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+
+  /* List accents are shared between themes: Things keeps its icon colors. */
+  --c-inbox: #4a90d9;
+  --c-today: #f9c440;
+  --c-upcoming: #e4574c;
+  --c-anytime: #1fa3b8;
+  --c-someday: #b7924f;
+  --c-logbook: #57ab5a;
+  --c-trash: #9aa0a8;
+  --c-project: #4a90d9;
+  --c-deadline: #e1483b;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg-sidebar: #eaecf1;
+  --bg-sidebar-top: #eef0f4;
+  --bg-content: #ffffff;
+  --bg-card: #ffffff;
+  --bg-hover: rgba(0, 0, 0, 0.035);
+  --bg-selected: #dfe8f8;
+  --bg-selected-idle: #e6e8ec;
+  --bg-chip: #eceef2;
+  --bg-overlay: rgba(0, 0, 0, 0.18);
+
+  --text-primary: #1b1c1e;
+  --text-secondary: #83878f;
+  --text-tertiary: #aeb2ba;
+  --text-inverse: #ffffff;
+
+  --line: #e5e6ea;
+  --line-strong: #d3d5da;
+  --check-border: #c3c6cc;
+
+  --accent: #2f7cf6;
+  --shadow-card: 0 6px 22px rgba(20, 24, 33, 0.14), 0 0 0 0.5px rgba(20, 24, 33, 0.08);
+  --shadow-pop: 0 10px 34px rgba(20, 24, 33, 0.22), 0 0 0 0.5px rgba(20, 24, 33, 0.1);
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg-sidebar: #17181b;
+  --bg-sidebar-top: #1b1c20;
+  --bg-content: #202226;
+  --bg-card: #292c31;
+  --bg-hover: rgba(255, 255, 255, 0.045);
+  --bg-selected: #33415c;
+  --bg-selected-idle: #2c2f35;
+  --bg-chip: #31343a;
+  --bg-overlay: rgba(0, 0, 0, 0.45);
+
+  --text-primary: #e9ebee;
+  --text-secondary: #8d929b;
+  --text-tertiary: #6b7079;
+  --text-inverse: #ffffff;
+
+  --line: #2b2d32;
+  --line-strong: #383b41;
+  --check-border: #565a61;
+
+  --accent: #4f92ff;
+  --shadow-card: 0 8px 26px rgba(0, 0, 0, 0.45), 0 0 0 0.5px rgba(255, 255, 255, 0.06);
+  --shadow-pop: 0 14px 40px rgba(0, 0, 0, 0.55), 0 0 0 0.5px rgba(255, 255, 255, 0.08);
+}

@@ -1,0 +1,61 @@
+name: build
+
+# Проверки на каждый пуш, установщики — на тег вида v0.1.0.
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Типы и тесты
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run verify
+      - run: npm run build
+
+  package:
+    name: Установщик (${{ matrix.os }})
+    needs: verify
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            command: npm run package:win
+            artifact: windows-installer
+            files: release/*.exe
+          - os: macos-latest
+            command: npm run package:mac
+            artifact: macos-dmg
+            files: release/*.dmg
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Windows-сборку нельзя собрать на macOS и наоборот: каждая идёт на своей машине.
+      - run: ${{ matrix.command }}
+        env:
+          # Без сертификатов electron-builder не пытается подписывать.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.files }}
+          if-no-files-found: error

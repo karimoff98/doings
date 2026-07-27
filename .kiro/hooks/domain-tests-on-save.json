@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Тесты при сохранении логики",
+      "trigger": "PostFileSave",
+      "description": "Прогоняет тесты после сохранения файлов доменного слоя или стора, чтобы регрессии в логике ловились сразу.",
+      "matcher": "src/(domain|store)/.*\\.ts$",
+      "action": {
+        "type": "command",
+        "command": "npm test --silent",
+        "timeout": 120
+      }
+    }
+  ]
+}

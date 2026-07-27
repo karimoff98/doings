@@ -1,0 +1,50 @@
+{
+  "plugins": ["react", "typescript", "unicorn", "oxc"],
+  "env": {
+    "browser": true,
+    "es2024": true
+  },
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn",
+    "perf": "warn"
+  },
+  "rules": {
+    "eqeqeq": "error",
+    "no-console": ["warn", { "allow": ["warn", "error"] }],
+    "no-var": "error",
+    "prefer-const": "error",
+    "react/jsx-key": "error",
+    "react/react-in-jsx-scope": "off",
+    "react-hooks/exhaustive-deps": "warn",
+    "react-hooks/rules-of-hooks": "error",
+    "typescript/no-explicit-any": "error",
+    "no-await-in-loop": "off",
+    "no-underscore-dangle": ["warn", { "allow": ["__store"] }],
+    "react/no-array-index-key": "off",
+    "unicorn/prefer-node-protocol": "off",
+    "unicorn/consistent-function-scoping": "off",
+    "unicorn/prefer-add-event-listener": "off",
+    "unicorn/no-array-reverse": "off",
+    "unicorn/no-array-sort": "off"
+  },
+  "ignorePatterns": ["dist", "release", "build", "node_modules"],
+  "overrides": [
+    {
+      "files": ["**/*.test.ts"],
+      "rules": {
+        "no-console": "off"
+      }
+    },
+    {
+      "files": ["electron/**/*.cjs", "scripts/**/*.mjs"],
+      "env": {
+        "browser": false,
+        "node": true
+      },
+      "rules": {
+        "no-console": "off"
+      }
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+/* The Quick Entry window is transparent: only the card is visible. */
+:root[data-quick='true'],
+:root[data-quick='true'] body {
+  background: transparent;
+}
+
+/* Quick Entry window: floating card, no chrome. */
+.quick {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: 100%;
+  padding: 14px 16px 10px;
+  border-radius: 12px;
+  background: var(--bg-card);
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.18),
+    0 18px 44px rgba(0, 0, 0, 0.34);
+  -webkit-app-region: drag;
+}
+
+.quick__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.quick__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+}
+
+.quick__input {
+  flex: 1;
+  min-width: 0;
+  font-size: 17px;
+  -webkit-app-region: no-drag;
+}
+
+.quick__hint {
+  display: flex;
+  gap: 14px;
+  padding-left: 28px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
