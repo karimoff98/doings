@@ -1,0 +1,7 @@
+# Keep Prettier checks identical on macOS, Linux, and Windows runners.
+* text=auto eol=lf
+
+# Build assets must never undergo line-ending conversion.
+*.png binary
+*.ico binary
+*.icns binary
