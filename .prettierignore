@@ -1,4 +1,6 @@
 dist
 release
 build
+docs
+LICENSE
 package-lock.json

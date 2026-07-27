@@ -3,7 +3,17 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Things 3 style task manager. Desktop app, macOS first, Windows later.",
+  "description": "Things 3 style task manager. Desktop app for macOS and Windows.",
+  "license": "MIT",
+  "author": "karimoff98",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/karimoff98/doings.git"
+  },
+  "bugs": {
+    "url": "https://github.com/karimoff98/doings/issues"
+  },
+  "homepage": "https://github.com/karimoff98/doings#readme",
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
