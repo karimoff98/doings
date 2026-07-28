@@ -3,6 +3,7 @@ import { formatDayShort } from '../domain/dates';
 import { projectTitle } from '../domain/lists';
 import { describeRepeat } from '../domain/repeat';
 import type { Todo } from '../domain/types';
+import { registerPendingEdit } from '../store/pendingEdits';
 import { useStore } from '../store/store';
 import { AutoTextarea } from './AutoTextarea';
 import { Checkbox } from './Checkbox';
@@ -119,6 +120,10 @@ export function TaskEditor({ todo }: TaskEditorProps) {
 
   // Whatever is pending must reach the store before the card goes away.
   useEffect(() => flushText, [flushText]);
+
+  // Quitting asks every open editor to hand over its text before the database
+  // is written, otherwise the last characters never reach the disk.
+  useEffect(() => registerPendingEdit(flushText), [flushText]);
 
   // Adopt an external change (rare: undo closes the editor) only when the user
   // has nothing half-typed here.

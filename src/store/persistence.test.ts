@@ -314,6 +314,71 @@ describe('файловое хранилище', () => {
   });
 });
 
+describe('сохранение перед выходом', () => {
+  it('успевает записать текст, который ещё печатали в редакторе', async () => {
+    const save = vi.fn().mockResolvedValue({ ok: true, revision: 1 });
+    mockDesktop({ save });
+    const { appStorage, flushPendingWrites } = await loadModule();
+    // Same module graph as the storage under test, so the registry is shared.
+    const { registerPendingEdit } = await import('./pendingEdits');
+
+    // The editor holds the newest characters in local state: pressing ⌘Q right
+    // after typing must commit them and only then write the database.
+    registerPendingEdit(() => {
+      appStorage.setItem('doings.v1', { state: { db: 'напечатано' }, version: 1 } as never);
+    });
+
+    const result = await flushPendingWrites();
+
+    expect(result.ok).toBe(true);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(String(save.mock.calls[0][0])).toContain('напечатано');
+  });
+
+  it('на ошибке записи не докладывает об успехе', async () => {
+    const save = vi.fn().mockResolvedValue({ ok: false, reason: 'io' });
+    mockDesktop({ save });
+    const { appStorage, flushPendingWrites, setStorageErrorHandler } = await loadModule();
+    setStorageErrorHandler((message) => errors.push(message));
+
+    appStorage.setItem('doings.v1', { state: { db: 1 }, version: 1 } as never);
+    const result = await flushPendingWrites();
+
+    // Reporting success here would let the app quit and lose the changes.
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('Не удалось сохранить базу');
+  });
+
+  it('на конфликте базы не докладывает об успехе', async () => {
+    const save = vi.fn().mockResolvedValue({ ok: false, reason: 'conflict', revision: 9 });
+    mockDesktop({ save });
+    const { appStorage, flushPendingWrites, setStorageErrorHandler } = await loadModule();
+    setStorageErrorHandler((message) => errors.push(message));
+
+    appStorage.setItem('doings.v1', { state: { db: 1 }, version: 1 } as never);
+    const result = await flushPendingWrites();
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('другой копией');
+  });
+
+  it('после удачной записи снова докладывает об успехе', async () => {
+    const save = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, reason: 'io' })
+      .mockResolvedValue({ ok: true, revision: 1 });
+    mockDesktop({ save });
+    const { appStorage, flushPendingWrites } = await loadModule();
+
+    appStorage.setItem('doings.v1', { state: { db: 1 }, version: 1 } as never);
+    expect((await flushPendingWrites()).ok).toBe(false);
+
+    // A stale failure must not block quitting forever once the disk recovers.
+    appStorage.setItem('doings.v1', { state: { db: 2 }, version: 1 } as never);
+    expect((await flushPendingWrites()).ok).toBe(true);
+  });
+});
+
 describe('браузерное хранилище', () => {
   it('повреждённое значение не роняет запуск', async () => {
     localStorage.setItem('doings.v1', 'не json');

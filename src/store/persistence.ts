@@ -1,5 +1,6 @@
 import { createJSONStorage } from 'zustand/middleware';
 import type { StateStorage } from 'zustand/middleware';
+import { commitPendingEdits } from './pendingEdits';
 import { reportSaveStatus } from './saveStatus';
 
 /** How long we wait after the last change before touching the disk. */
@@ -101,8 +102,29 @@ function revisionOf(text: string): number {
 /** Waits until everything the user has done is on disk. Used before quitting. */
 let flushAll: () => Promise<void> = async () => {};
 
-export function flushPendingWrites(): Promise<void> {
-  return flushAll();
+/**
+ * Reason the latest write failed, or null when the disk is up to date. Kept
+ * across calls on purpose: a background write that failed while nothing new is
+ * pending still means the file on disk is stale.
+ */
+let lastWriteFailure: string | null = null;
+
+export interface FlushResult {
+  ok: boolean;
+  /** Why the data is not on disk. Only set when `ok` is false. */
+  error?: string;
+}
+
+/**
+ * Commits whatever is still being typed, then waits for the write to land.
+ * The result must be honest: the desktop shell cancels the quit when it is not
+ * `ok`, and reporting success here would silently lose the last changes.
+ */
+export async function flushPendingWrites(): Promise<FlushResult> {
+  // Text first, disk second: an open editor holds the newest characters.
+  commitPendingEdits();
+  await flushAll();
+  return lastWriteFailure ? { ok: false, error: lastWriteFailure } : { ok: true };
 }
 
 function legacyValue(name: string): string | null {
@@ -142,9 +164,15 @@ function fileStorage(): StateStorage | null {
   const write = (json: string): Promise<void> => {
     reportSaveStatus('saving');
     queue = queue.then(async () => {
-      if (writesBlocked) {
-        report(writesBlocked);
+      /** Records why the data is not on disk, for the caller that waits on us. */
+      const fail = (message: string) => {
+        lastWriteFailure = message;
         reportSaveStatus('error');
+        report(message);
+      };
+
+      if (writesBlocked) {
+        fail(writesBlocked);
         return;
       }
       try {
@@ -153,11 +181,11 @@ function fileStorage(): StateStorage | null {
         const outcome = typeof raw === 'boolean' ? { ok: raw } : (raw ?? { ok: false });
         if (outcome.ok) {
           if (typeof outcome.revision === 'number') baseRevision = outcome.revision;
+          lastWriteFailure = null;
           forgetReportedErrors();
           reportSaveStatus('saved');
           return;
         }
-        reportSaveStatus('error');
         if (outcome.reason === 'conflict') {
           // Another copy of the app owns the file now: overwriting it would
           // silently throw away whatever that copy has saved.
@@ -165,13 +193,12 @@ function fileStorage(): StateStorage | null {
             'База изменена другой копией приложения. Изменения этой копии не сохраняются — ' +
             'закройте лишнее окно приложения и запустите его заново.';
           blockWrites(message);
-          report(message);
+          fail(message);
           return;
         }
-        report('Не удалось сохранить базу на диск. Проверьте свободное место и права доступа.');
+        fail('Не удалось сохранить базу на диск. Проверьте свободное место и права доступа.');
       } catch (error) {
-        reportSaveStatus('error');
-        report(`Не удалось сохранить базу: ${String(error)}`);
+        fail(`Не удалось сохранить базу: ${String(error)}`);
       }
     });
     return queue;
@@ -192,10 +219,16 @@ function fileStorage(): StateStorage | null {
     await queue;
   };
 
-  window.addEventListener('pagehide', flush);
-  window.addEventListener('beforeunload', flush);
+  /** The window going away is the same deadline as quitting: text first, then disk. */
+  const flushEverything = () => {
+    commitPendingEdits();
+    void flush();
+  };
+
+  window.addEventListener('pagehide', flushEverything);
+  window.addEventListener('beforeunload', flushEverything);
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') flush();
+    if (document.visibilityState === 'hidden') flushEverything();
   });
 
   /** A file that is not JSON at all: try the backup, then set it aside. */
@@ -305,6 +338,7 @@ function browserStorage(): StateStorage {
     },
     setItem: (name, value) => {
       if (writesBlocked) {
+        lastWriteFailure = writesBlocked;
         report(writesBlocked);
         reportSaveStatus('error');
         return;
@@ -312,12 +346,15 @@ function browserStorage(): StateStorage {
       try {
         globalThis.localStorage.setItem(name, value);
         dropLegacy();
+        lastWriteFailure = null;
         forgetReportedErrors();
         reportSaveStatus('saved');
       } catch (error) {
-        reportSaveStatus('error');
         // Usually the quota: tell the user instead of losing changes quietly.
-        report(`Не удалось сохранить данные в браузере: ${String(error)}`);
+        const message = `Не удалось сохранить данные в браузере: ${String(error)}`;
+        lastWriteFailure = message;
+        reportSaveStatus('error');
+        report(message);
       }
     },
     removeItem: (name) => globalThis.localStorage.removeItem(name),
