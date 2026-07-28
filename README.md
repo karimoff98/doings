@@ -1,8 +1,28 @@
 # Doings
 
+[![build](https://github.com/karimoff98/doings/actions/workflows/build.yml/badge.svg)](https://github.com/karimoff98/doings/actions/workflows/build.yml)
+[![последний выпуск](https://img.shields.io/github/v/release/karimoff98/doings?include_prereleases&label=выпуск)](https://github.com/karimoff98/doings/releases/latest)
+[![лицензия MIT](https://img.shields.io/github/license/karimoff98/doings?label=лицензия)](LICENSE)
+
 Менеджер задач для macOS и Windows, сделанный по образу [Things 3](https://culturedcode.com/things/): области и проекты, умные списки, полностью клавиатурная работа. React + TypeScript в Electron, данные лежат локально в одном JSON-файле.
 
 ![Список «Сегодня»](docs/screenshot-today.png)
+
+## Скачать
+
+Готовые сборки — на [странице выпусков](https://github.com/karimoff98/doings/releases/latest). Текущая версия альфа: работает, но синхронизации между устройствами нет, а установщики не подписаны.
+
+| Система                      | Файл                        |
+| ---------------------------- | --------------------------- |
+| macOS, Apple silicon (M1+)   | `Doings-<версия>-arm64.dmg` |
+| macOS, Intel                 | `Doings-<версия>.dmg`       |
+| Windows 10 и 11, x64 и arm64 | `Doings.Setup.<версия>.exe` |
+
+**macOS.** Откройте `.dmg` и перетащите приложение в «Программы». При первом запуске нажмите на иконку правой кнопкой и выберите «Открыть» — иначе Gatekeeper заблокирует неподписанное приложение. Дальше запускается обычным двойным щелчком.
+
+**Windows.** Запустите `.exe`. SmartScreen предупредит о неизвестном издателе: «Подробнее» → «Выполнить в любом случае». Установщик спросит папку и создаст ярлыки.
+
+Приложение никуда не ходит по сети и ничего не отправляет: все задачи лежат в файле на вашем диске, копию можно сохранить и загрузить в настройках (`⌘,`).
 
 ## Возможности
 
