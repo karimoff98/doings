@@ -29,6 +29,8 @@ export function QuickFind() {
   const hits = useMemo<Hit[]>(() => {
     const q = query.trim().toLowerCase();
     const result: Hit[] = [];
+    const areasById = new Map(db.areas.map((area) => [area.id, area]));
+    const projectsById = new Map(db.projects.map((project) => [project.id, project]));
 
     for (const key of SMART_LISTS) {
       const meta = SMART_LIST_META[key];
@@ -59,7 +61,7 @@ export function QuickFind() {
       result.push({
         key: `project:${project.id}`,
         title: name,
-        sub: db.areas.find((a) => a.id === project.areaId)?.title,
+        sub: project.areaId ? areasById.get(project.areaId)?.title : undefined,
         icon: 'project',
         color: 'var(--c-project)',
         list: `project:${project.id}`,
@@ -81,8 +83,8 @@ export function QuickFind() {
       for (const todo of db.todos.filter((t) => !t.trashed)) {
         const haystack = `${todo.title} ${todo.notes}`.toLowerCase();
         if (!haystack.includes(q)) continue;
-        const project = db.projects.find((p) => p.id === todo.projectId);
-        const area = db.areas.find((a) => a.id === todo.areaId);
+        const project = todo.projectId ? projectsById.get(todo.projectId) : undefined;
+        const area = todo.areaId ? areasById.get(todo.areaId) : undefined;
         result.push({
           key: `todo:${todo.id}`,
           title: todo.title || 'Без названия',

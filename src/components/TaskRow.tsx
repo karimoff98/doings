@@ -1,7 +1,7 @@
 import type { DragEvent, MouseEvent } from 'react';
 import { formatDayShort, isPast, isToday } from '../domain/dates';
 import { describeRepeat } from '../domain/repeat';
-import type { Database, Todo } from '../domain/types';
+import type { Area, Id, Project, Tag, Todo } from '../domain/types';
 import { Checkbox } from './Checkbox';
 import { Icon } from './Icon';
 
@@ -9,7 +9,9 @@ export type DropEdge = 'top' | 'bottom';
 
 interface TaskRowProps {
   todo: Todo;
-  db: Database;
+  projectsById: ReadonlyMap<Id, Project>;
+  areasById: ReadonlyMap<Id, Area>;
+  tagsById: ReadonlyMap<Id, Tag>;
   selected: boolean;
   /** Trash and Logbook rows cannot be dragged anywhere useful. */
   draggable?: boolean;
@@ -40,7 +42,9 @@ function edgeOf(event: DragEvent<HTMLElement>): DropEdge {
 
 export function TaskRow({
   todo,
-  db,
+  projectsById,
+  areasById,
+  tagsById,
   selected,
   draggable,
   dragging,
@@ -58,11 +62,11 @@ export function TaskRow({
   onDrop,
   onDragEnd,
 }: TaskRowProps) {
-  const project = todo.projectId ? db.projects.find((p) => p.id === todo.projectId) : undefined;
-  const area = todo.areaId ? db.areas.find((a) => a.id === todo.areaId) : undefined;
+  const project = todo.projectId ? projectsById.get(todo.projectId) : undefined;
+  const area = todo.areaId ? areasById.get(todo.areaId) : undefined;
   const container = project?.title ?? area?.title;
   const tags = todo.tagIds
-    .map((id) => db.tags.find((t) => t.id === id))
+    .map((id) => tagsById.get(id))
     .filter((tag): tag is NonNullable<typeof tag> => Boolean(tag));
   const checklistDone = todo.checklist.filter((item) => item.done).length;
 

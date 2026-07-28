@@ -49,12 +49,12 @@ function isDone(item: { status: string; trashed: boolean }): boolean {
 }
 
 /** A todo inherits visibility from its project: a Someday project hides its todos. */
-function projectOf(db: Database, todo: Todo): Project | undefined {
-  return todo.projectId ? db.projects.find((p) => p.id === todo.projectId) : undefined;
+function projectOf(projectsById: ReadonlyMap<Id, Project>, todo: Todo): Project | undefined {
+  return todo.projectId ? projectsById.get(todo.projectId) : undefined;
 }
 
-function blockedByProject(db: Database, todo: Todo): boolean {
-  const project = projectOf(db, todo);
+function blockedByProject(projectsById: ReadonlyMap<Id, Project>, todo: Todo): boolean {
+  const project = projectOf(projectsById, todo);
   // Orphans (missing or trashed project) stay visible: they live in the Inbox.
   if (!project || project.trashed) return false;
   if (project.status !== 'open') return true;
@@ -96,24 +96,30 @@ function projectRow(db: Database, project: Project): Row {
 }
 
 /** A todo pointing at a deleted or trashed project has no home: treat it as Inbox. */
-function isOrphan(db: Database, todo: Todo): boolean {
+function isOrphan(projectsById: ReadonlyMap<Id, Project>, todo: Todo): boolean {
   if (!todo.projectId) return false;
-  const project = db.projects.find((p) => p.id === todo.projectId);
+  const project = projectsById.get(todo.projectId);
   return !project || project.trashed;
 }
 
-function inboxTodos(db: Database): Todo[] {
-  return db.todos.filter((t) => isLive(t) && !t.areaId && (!t.projectId || isOrphan(db, t)));
+function inboxTodos(db: Database, projectsById: ReadonlyMap<Id, Project>): Todo[] {
+  return db.todos.filter(
+    (t) => isLive(t) && !t.areaId && (!t.projectId || isOrphan(projectsById, t)),
+  );
 }
 
 /** Group todos by their container, projects first in sidebar order, then areas, then Inbox. */
-function groupByContainer(db: Database, todos: Todo[]): Section[] {
+function groupByContainer(
+  db: Database,
+  todos: Todo[],
+  projectsById: ReadonlyMap<Id, Project>,
+): Section[] {
   const loose: Todo[] = [];
   const byProject = new Map<Id, Todo[]>();
   const byArea = new Map<Id, Todo[]>();
 
   for (const todo of todos) {
-    if (todo.projectId && !isOrphan(db, todo)) {
+    if (todo.projectId && !isOrphan(projectsById, todo)) {
       const list = byProject.get(todo.projectId) ?? [];
       list.push(todo);
       byProject.set(todo.projectId, list);
@@ -163,9 +169,9 @@ function groupByContainer(db: Database, todos: Todo[]): Section[] {
   return sections;
 }
 
-function todayList(db: Database): Section[] {
+function todayList(db: Database, projectsById: ReadonlyMap<Id, Project>): Section[] {
   const candidates = db.todos.filter((todo) => {
-    if (!isLive(todo) || blockedByProject(db, todo)) return false;
+    if (!isLive(todo) || blockedByProject(projectsById, todo)) return false;
     const start = startDay(todo);
     const startedByNow = start !== undefined && daysFromToday(start) <= 0;
     const deadlineDue = todo.deadline !== undefined && daysFromToday(todo.deadline) <= 0;
@@ -198,10 +204,10 @@ function todayList(db: Database): Section[] {
   return sections;
 }
 
-function upcomingList(db: Database): Section[] {
+function upcomingList(db: Database, projectsById: ReadonlyMap<Id, Project>): Section[] {
   const items = new Map<IsoDay, Todo[]>();
   for (const todo of db.todos) {
-    if (!isLive(todo) || blockedByProject(db, todo)) continue;
+    if (!isLive(todo) || blockedByProject(projectsById, todo)) continue;
     let day: IsoDay | undefined;
     if (todo.when.kind === 'scheduled' && todo.when.date && daysFromToday(todo.when.date) > 0) {
       day = todo.when.date;
@@ -230,21 +236,21 @@ function upcomingList(db: Database): Section[] {
   }));
 }
 
-function anytimeList(db: Database): Section[] {
+function anytimeList(db: Database, projectsById: ReadonlyMap<Id, Project>): Section[] {
   const todos = db.todos.filter(
-    (todo) => isLive(todo) && !blockedByProject(db, todo) && isActionableNow(todo),
+    (todo) => isLive(todo) && !blockedByProject(projectsById, todo) && isActionableNow(todo),
   );
-  return groupByContainer(db, todos);
+  return groupByContainer(db, todos, projectsById);
 }
 
-function somedayList(db: Database): Section[] {
+function somedayList(db: Database, projectsById: ReadonlyMap<Id, Project>): Section[] {
   const todos = db.todos.filter((todo) => {
     if (!isLive(todo)) return false;
     if (todo.when.kind === 'someday') return true;
-    const project = projectOf(db, todo);
+    const project = projectOf(projectsById, todo);
     return project?.status === 'open' && !project.trashed && project.when.kind === 'someday';
   });
-  return groupByContainer(db, todos);
+  return groupByContainer(db, todos, projectsById);
 }
 
 function logbookList(db: Database): Section[] {
@@ -365,25 +371,33 @@ function areaList(db: Database, areaId: Id): Section[] {
   return sections;
 }
 
-function tagList(db: Database, tagId: Id): Section[] {
+function tagList(db: Database, tagId: Id, projectsById: ReadonlyMap<Id, Project>): Section[] {
   const todos = db.todos.filter((t) => isLive(t) && t.tagIds.includes(tagId));
-  return groupByContainer(db, todos);
+  return groupByContainer(db, todos, projectsById);
 }
 
 /** Single entry point: turn a list key into rendered sections. */
 export function selectSections(db: Database, key: ListKey): Section[] {
   const list = parseListKey(key);
+  const projectsById = new Map(db.projects.map((project) => [project.id, project]));
   switch (list.kind) {
     case 'inbox':
-      return [{ id: 'inbox', rows: todoRows(inboxTodos(db)), container: {}, reorderable: true }];
+      return [
+        {
+          id: 'inbox',
+          rows: todoRows(inboxTodos(db, projectsById)),
+          container: {},
+          reorderable: true,
+        },
+      ];
     case 'today':
-      return todayList(db);
+      return todayList(db, projectsById);
     case 'upcoming':
-      return upcomingList(db);
+      return upcomingList(db, projectsById);
     case 'anytime':
-      return anytimeList(db);
+      return anytimeList(db, projectsById);
     case 'someday':
-      return somedayList(db);
+      return somedayList(db, projectsById);
     case 'logbook':
       return logbookList(db);
     case 'trash':
@@ -393,16 +407,17 @@ export function selectSections(db: Database, key: ListKey): Section[] {
     case 'area':
       return areaList(db, list.id);
     case 'tag':
-      return tagList(db, list.id);
+      return tagList(db, list.id, projectsById);
   }
 }
 
 /** Badge numbers in the sidebar. Things only counts Inbox and Today. */
 export function listCount(db: Database, key: ListKey): number {
   const list = parseListKey(key);
-  if (list.kind === 'inbox') return inboxTodos(db).length;
+  const projectsById = new Map(db.projects.map((project) => [project.id, project]));
+  if (list.kind === 'inbox') return inboxTodos(db, projectsById).length;
   if (list.kind === 'today') {
-    return todayList(db).reduce((sum, section) => sum + section.rows.length, 0);
+    return todayList(db, projectsById).reduce((sum, section) => sum + section.rows.length, 0);
   }
   if (list.kind === 'project') {
     return db.todos.filter((t) => t.projectId === list.id && t.status === 'open' && !t.trashed)

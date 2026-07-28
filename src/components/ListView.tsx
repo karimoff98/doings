@@ -91,11 +91,12 @@ function tagsInSections(db: Database, sections: Section[]): Tag[] {
 /** Keeps only the rows carrying at least one of the selected tags. */
 function applyTagFilter(sections: Section[], tagFilter: Id[]): Section[] {
   if (!tagFilter.length) return sections;
+  const selectedTags = new Set(tagFilter);
   return sections
     .map((section) => ({
       ...section,
       rows: section.rows.filter(
-        (row) => row.kind === 'todo' && row.todo.tagIds.some((id) => tagFilter.includes(id)),
+        (row) => row.kind === 'todo' && row.todo.tagIds.some((id) => selectedTags.has(id)),
       ),
     }))
     .filter((section) => section.rows.length > 0);
@@ -133,6 +134,14 @@ export function ListView() {
   const [tagMenu, setTagMenu] = useState<{ at: MenuPosition; tag: Tag } | null>(null);
 
   const list = parseListKey(selectedList);
+  const projectsById = useMemo(
+    () => new Map(db.projects.map((project) => [project.id, project])),
+    [db.projects],
+  );
+  const areasById = useMemo(() => new Map(db.areas.map((area) => [area.id, area])), [db.areas]);
+  const tagsById = useMemo(() => new Map(db.tags.map((tag) => [tag.id, tag])), [db.tags]);
+  const selectedIds = useMemo(() => new Set(selection), [selection]);
+  const draggedIds = useMemo(() => new Set(draggingIds), [draggingIds]);
   // Deriving the sections walks the whole database, so it must not run on every
   // click or drag — only when the data or the chosen list actually changes.
   const allSections = useMemo<Section[]>(
@@ -150,8 +159,12 @@ export function ListView() {
   );
   const options = rowOptions(list.kind);
   const hasRows = sections.some((section) => section.rows.length > 0);
-  const visibleIds = sections.flatMap((section) =>
-    section.rows.flatMap((row) => (row.kind === 'todo' ? [row.todo.id] : [])),
+  const visibleIds = useMemo(
+    () =>
+      sections.flatMap((section) =>
+        section.rows.flatMap((row) => (row.kind === 'todo' ? [row.todo.id] : [])),
+      ),
+    [sections],
   );
 
   const handleClick = (id: Id, event: MouseEvent) => {
@@ -175,8 +188,8 @@ export function ListView() {
   };
 
   const beginDrag = (id: Id, event: DragEvent) => {
-    const ids = selection.includes(id) ? selection : [id];
-    if (!selection.includes(id)) selectTodo(id);
+    const ids = selectedIds.has(id) ? selection : [id];
+    if (!selectedIds.has(id)) selectTodo(id);
     setDragging(ids);
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('text/plain', ids.join(','));
@@ -203,9 +216,10 @@ export function ListView() {
     if (!ids.length) return;
 
     const sectionIds = section.rows.flatMap((row) => (row.kind === 'todo' ? [row.todo.id] : []));
-    const kept = sectionIds.filter((id) => !ids.includes(id));
+    const moved = new Set(ids);
+    const kept = sectionIds.filter((id) => !moved.has(id));
     let position = kept.length;
-    if (targetId && !ids.includes(targetId)) {
+    if (targetId && !moved.has(targetId)) {
       const at = kept.indexOf(targetId);
       if (at !== -1) position = edge === 'top' ? at : at + 1;
     }
@@ -331,10 +345,12 @@ export function ListView() {
                     <TaskRow
                       key={todo.id}
                       todo={todo}
-                      db={db}
-                      selected={selection.includes(todo.id)}
+                      projectsById={projectsById}
+                      areasById={areasById}
+                      tagsById={tagsById}
+                      selected={selectedIds.has(todo.id)}
                       draggable={Boolean(section.reorderable)}
-                      dragging={draggingIds.includes(todo.id)}
+                      dragging={draggedIds.has(todo.id)}
                       dropEdge={isDropTarget ? drop?.edge : undefined}
                       muted={section.muted}
                       showWhen={options.showWhen}
@@ -343,7 +359,7 @@ export function ListView() {
                       onContextMenu={(event) => {
                         event.preventDefault();
                         // Right-clicking outside the selection selects that row first.
-                        if (!selection.includes(todo.id)) selectTodo(todo.id);
+                        if (!selectedIds.has(todo.id)) selectTodo(todo.id);
                         setMenuAt({ x: event.clientX, y: event.clientY });
                       }}
                       onTagClick={(tagId) => selectList(`tag:${tagId}`)}
