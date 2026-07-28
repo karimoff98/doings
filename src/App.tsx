@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ListView } from './components/ListView';
 import { MoveDialog } from './components/MoveDialog';
+import { Onboarding } from './components/Onboarding';
 import { QuickFind } from './components/QuickFind';
 import { SettingsDialog } from './components/SettingsDialog';
 import { ShortcutsDialog } from './components/ShortcutsDialog';
@@ -65,8 +66,14 @@ export function App() {
   useDesktopSave();
   useReminders();
   const hydrated = useHydrated();
+  const storageError = useStore((s) => s.storageError);
+  const hydrationFailed = useStore((s) => s.hydrationFailed);
 
   if (!hydrated) return <div className="app app--loading" />;
+
+  // A problem with the database deserves the user's full attention: the
+  // introduction must not cover the warning about it.
+  const troubled = Boolean(storageError) || hydrationFailed;
 
   return (
     <div className="app">
@@ -77,6 +84,7 @@ export function App() {
       <ShortcutsDialog />
       <SettingsDialog />
       <StorageNotice />
+      {!troubled && <Onboarding />}
     </div>
   );
 }

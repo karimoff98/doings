@@ -115,6 +115,55 @@ export interface FlushResult {
   error?: string;
 }
 
+/** Marker of a finished onboarding, kept separately from the database. */
+const ONBOARDING_KEY = 'doings.onboarding.completed.v1';
+
+/** What the initial read found. Decided once, while loading. */
+type LoadOutcome = 'unknown' | 'empty' | 'existing' | 'failed';
+let loadOutcome: LoadOutcome = 'unknown';
+
+/** The Quick Entry window shares the bundle but must stay a plain input box. */
+function isQuickEntryWindow(): boolean {
+  return globalThis.location?.hash === '#quick';
+}
+
+export function isOnboardingComplete(): boolean {
+  try {
+    const storage = globalThis.localStorage;
+    // Without storage the answer cannot be remembered, and an introduction that
+    // returns on every launch is worse than one nobody sees.
+    if (!storage) return true;
+    return storage.getItem(ONBOARDING_KEY) === '1';
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Remembered separately from the database: the file may not exist yet when the
+ * user finishes reading, and closing the app right away must not bring the
+ * introduction back.
+ */
+export function markOnboardingComplete(): void {
+  try {
+    globalThis.localStorage?.setItem(ONBOARDING_KEY, '1');
+  } catch {
+    // Nothing to do: the worst case is showing the introduction once more.
+  }
+}
+
+/**
+ * True only for someone who has never used the app: no database, nothing to
+ * migrate, no read error to explain, and not the Quick Entry window. An update
+ * from an earlier version finds a database, so the introduction stays hidden.
+ */
+export function isFirstRun(): boolean {
+  if (isQuickEntryWindow()) return false;
+  if (isOnboardingComplete()) return false;
+  // Before the first read finishes we simply do not know yet.
+  return loadOutcome === 'empty';
+}
+
 /**
  * Commits whatever is still being typed, then waits for the write to land.
  * The result must be honest: the desktop shell cancels the quit when it is not
@@ -265,6 +314,9 @@ function fileStorage(): StateStorage | null {
       try {
         stored = await api.load();
       } catch (error) {
+        // A read that failed is not an empty profile: there may well be data we
+        // could not reach, so the introduction must not hide the warning.
+        loadOutcome = 'failed';
         report(`Не удалось прочитать базу: ${String(error)}`);
         return null;
       }
@@ -273,6 +325,7 @@ function fileStorage(): StateStorage | null {
         // Broken JSON must never reach zustand: it would abort hydration and
         // leave the window empty.
         const usable = readableJson(stored) ?? (await rescue());
+        loadOutcome = usable ? 'existing' : 'failed';
         baseRevision = usable ? revisionOf(usable) : 0;
         return usable;
       }
@@ -281,10 +334,13 @@ function fileStorage(): StateStorage | null {
       // Databases created before the switch to a file still live in localStorage.
       const legacy = readableJson(legacyValue(name));
       if (legacy) {
+        loadOutcome = 'existing';
         await write(legacy);
         dropLegacy();
         return legacy;
       }
+      // Nothing here and nothing to migrate: a genuinely new profile.
+      loadOutcome = 'empty';
       return null;
     },
     setItem(_name, value) {
@@ -334,6 +390,7 @@ function browserStorage(): StateStorage {
       if (stored && !usable) {
         report('Сохранённые данные в браузере повреждены, открыты демонстрационные данные.');
       }
+      loadOutcome = usable ? 'existing' : stored ? 'failed' : 'empty';
       return usable;
     },
     setItem: (name, value) => {

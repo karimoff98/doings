@@ -500,3 +500,210 @@
   background: var(--bg-hover);
   color: var(--text-primary);
 }
+
+/* Onboarding: three screens shown once, on a brand-new profile */
+.onboard__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  /* Denser than the usual overlay: nothing behind it should look usable. */
+  background: color-mix(in srgb, var(--bg-overlay) 100%, black 22%);
+  animation: fade-in var(--dur-med) linear;
+}
+
+.onboard {
+  width: min(600px, 100%);
+  /* Stable height, so the buttons do not jump between screens. */
+  min-height: 396px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  background: var(--bg-card);
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+  animation: dialog-in var(--dur-med) var(--ease);
+}
+
+.onboard__body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 30px 34px 22px;
+  animation: onboard-step var(--dur-med) var(--ease);
+}
+
+@keyframes onboard-step {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+}
+
+.onboard__mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--text-inverse);
+}
+
+.onboard__title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  color: var(--text-primary);
+}
+
+.onboard__text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+.onboard__note {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.onboard__places {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.onboard__place {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+}
+
+.onboard__place-icon {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--bg-chip);
+}
+
+.onboard__place-title {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.onboard__place-text {
+  display: block;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.onboard__keys {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.onboard__key {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 2px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13.5px;
+  color: var(--text-primary);
+}
+
+.onboard__key:last-child {
+  border-bottom: none;
+}
+
+.onboard__kbd {
+  flex: none;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--bg-chip);
+  font-family: inherit;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.onboard__footer {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-card);
+}
+
+.onboard__progress {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.onboard__spacer {
+  flex: 1;
+}
+
+.onboard__primary {
+  background: var(--accent);
+  color: var(--text-inverse);
+}
+
+.onboard__primary:hover {
+  filter: brightness(1.06);
+}
+
+/* A narrow window still has to fit the card and its buttons. */
+@media (max-width: 720px) {
+  .onboard__scrim {
+    padding: 14px;
+  }
+
+  .onboard {
+    min-height: 0;
+  }
+
+  .onboard__body {
+    padding: 22px 20px 16px;
+  }
+
+  .onboard__footer {
+    flex-wrap: wrap;
+    padding: 12px 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onboard__scrim,
+  .onboard,
+  .onboard__body {
+    animation: none;
+  }
+}

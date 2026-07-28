@@ -314,6 +314,96 @@ describe('файловое хранилище', () => {
   });
 });
 
+describe('первый запуск и онбординг', () => {
+  const DB = JSON.stringify({ state: { db: { todos: [] } }, version: 1, revision: 4 });
+
+  it('новая установка без базы считается первым запуском', async () => {
+    mockDesktop({ load: vi.fn().mockResolvedValue(null) });
+    const { appStorage, isFirstRun } = await loadModule();
+
+    // Nothing is known until the first read finishes.
+    expect(isFirstRun()).toBe(false);
+    await appStorage.getItem('doings.v1');
+    expect(isFirstRun()).toBe(true);
+  });
+
+  it('существующая база 0.1.6 не считается первым запуском', async () => {
+    mockDesktop({ load: vi.fn().mockResolvedValue(DB) });
+    const { appStorage, isFirstRun } = await loadModule();
+
+    await appStorage.getItem('doings.v1');
+    // Updating from an earlier version must not show the introduction.
+    expect(isFirstRun()).toBe(false);
+  });
+
+  it('база прежнего имени тоже не первый запуск', async () => {
+    localStorage.setItem('things-clone.v1', JSON.stringify({ state: { db: 1 }, version: 1 }));
+    mockDesktop({ load: vi.fn().mockResolvedValue(null), save: vi.fn().mockResolvedValue(true) });
+    const { appStorage, isFirstRun } = await loadModule();
+
+    await appStorage.getItem('doings.v1');
+    expect(isFirstRun()).toBe(false);
+  });
+
+  it('после завершения онбординга он больше не первый запуск', async () => {
+    mockDesktop({ load: vi.fn().mockResolvedValue(null) });
+    const { appStorage, isFirstRun, markOnboardingComplete, isOnboardingComplete } =
+      await loadModule();
+
+    await appStorage.getItem('doings.v1');
+    expect(isFirstRun()).toBe(true);
+
+    markOnboardingComplete();
+    expect(isOnboardingComplete()).toBe(true);
+    // The marker lives outside the database, so a restart before the file
+    // appears still counts as "already seen".
+    expect(isFirstRun()).toBe(false);
+
+    const restarted = await loadModule();
+    await restarted.appStorage.getItem('doings.v1');
+    expect(restarted.isFirstRun()).toBe(false);
+  });
+
+  it('повреждённая база не выдаётся за первый запуск', async () => {
+    mockDesktop({
+      load: vi.fn().mockResolvedValue('{ это не json'),
+      loadBackup: vi.fn().mockResolvedValue(null),
+      quarantine: vi.fn().mockResolvedValue('/tmp/database.corrupt.json'),
+    });
+    const { appStorage, isFirstRun, setStorageErrorHandler } = await loadModule();
+    setStorageErrorHandler((message) => errors.push(message));
+
+    await appStorage.getItem('doings.v1');
+
+    // The warning is what matters here; the introduction would only hide it.
+    expect(isFirstRun()).toBe(false);
+    expect(errors.join(' ')).toContain('не читается');
+  });
+
+  it('ошибка чтения не выдаётся за первый запуск', async () => {
+    mockDesktop({ load: vi.fn().mockRejectedValue(new Error('диск отвалился')) });
+    const { appStorage, isFirstRun } = await loadModule();
+
+    await appStorage.getItem('doings.v1');
+    expect(isFirstRun()).toBe(false);
+  });
+
+  it('в окне быстрого ввода онбординга нет', async () => {
+    mockDesktop({ load: vi.fn().mockResolvedValue(null) });
+    const { appStorage, isFirstRun } = await loadModule();
+    await appStorage.getItem('doings.v1');
+    expect(isFirstRun()).toBe(true);
+
+    window.location.hash = '#quick';
+    try {
+      // Quick Entry shares the bundle but is just an input box.
+      expect(isFirstRun()).toBe(false);
+    } finally {
+      window.location.hash = '';
+    }
+  });
+});
+
 describe('сохранение перед выходом', () => {
   it('успевает записать текст, который ещё печатали в редакторе', async () => {
     const save = vi.fn().mockResolvedValue({ ok: true, revision: 1 });
