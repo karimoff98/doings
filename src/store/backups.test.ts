@@ -24,6 +24,7 @@ const storage = vi.hoisted(() => ({
   flush: { ok: true } as { ok: boolean; error?: string },
   held: [] as Promise<unknown>[],
   issues: [] as string[],
+  blocked: [] as string[],
 }));
 
 vi.mock('./persistence', async (importOriginal) => {
@@ -33,6 +34,7 @@ vi.mock('./persistence', async (importOriginal) => {
     flushPendingWrites: () => Promise.resolve(storage.flush),
     holdWrites: (work: Promise<unknown>) => void storage.held.push(work),
     reportStorageIssue: (message: string) => void storage.issues.push(message),
+    blockWritesPendingChoice: (reason: string) => void storage.blocked.push(reason),
   };
 });
 
@@ -126,6 +128,7 @@ beforeEach(() => {
   storage.flush = { ok: true };
   storage.held = [];
   storage.issues = [];
+  storage.blocked = [];
   const values = new Map<string, string>();
   Object.defineProperty(globalThis, 'localStorage', {
     configurable: true,
@@ -289,21 +292,38 @@ describe('копия перед обновлением схемы', () => {
     expect(storage.issues).toEqual([]);
   });
 
-  it('о неудаче сообщает баннером', async () => {
+  it('успешная копия не блокирует запись', async () => {
+    mockBridge();
+
+    await requestMigrationBackup();
+
+    // The migrated database may be written now.
+    expect(storage.blocked).toEqual([]);
+  });
+
+  it('ошибка копии блокирует запись и объясняет выбор', async () => {
     mockBridge({ create: vi.fn().mockResolvedValue({ ok: false, reason: 'io' }) });
 
     await requestMigrationBackup();
 
-    expect(storage.issues.join(' ')).toContain('перед обновлением схемы');
+    // Without a copy the old file must not be replaced silently.
+    expect(storage.blocked.join(' ')).toContain('перед обновлением схемы не создана');
+    expect(storage.issues.join(' ')).toContain('продолжить без резервной копии');
   });
 
-  it('отсутствие файла базы не считается проблемой', async () => {
-    // Nothing to copy on a first run; the banner would only confuse.
+  it('первый запуск без файла базы не блокируется', async () => {
+    // Nothing to copy yet; a banner and a block would only confuse.
     mockBridge({ create: vi.fn().mockResolvedValue({ ok: false, reason: 'no-database' }) });
 
     await requestMigrationBackup();
 
+    expect(storage.blocked).toEqual([]);
     expect(storage.issues).toEqual([]);
+  });
+
+  it('в браузере запись не блокируется', async () => {
+    await requestMigrationBackup();
+    expect(storage.blocked).toEqual([]);
   });
 });
 

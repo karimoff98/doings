@@ -70,14 +70,35 @@ function nameFor(date) {
 }
 
 /**
- * Cheap shape check: the persisted snapshot always carries `state.db` with a
- * list of todos. Deeper validation belongs to the renderer's validator.
+ * Every copy has a small sidecar with just the facts the list needs, so opening
+ * the settings never reads a single database.
  */
-function looksLikeDatabase(parsed) {
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
-  const db = parsed.state?.db;
+function metaNameFor(name) {
+  return name.replace(/\.json$/, '.meta.json');
+}
+
+function isMetaName(name) {
+  return name.endsWith('.meta.json');
+}
+
+const REQUIRED_LISTS = ['todos', 'projects', 'areas', 'headings', 'tags'];
+
+/**
+ * Shape check for the snapshot as the renderer writes it. Anything missing means
+ * we are looking at something else, and copying it would waste a retention slot
+ * on a file nobody can restore. Field-level validation stays in the renderer.
+ */
+function looksLikeDatabase(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  if (typeof value.version !== 'number') return false;
+
+  const state = value.state;
+  if (!state || typeof state !== 'object' || Array.isArray(state)) return false;
+
+  const db = state.db;
   if (!db || typeof db !== 'object' || Array.isArray(db)) return false;
-  return Array.isArray(db.todos);
+
+  return REQUIRED_LISTS.every((key) => Array.isArray(db[key]));
 }
 
 function countEntities(parsed) {
@@ -128,7 +149,7 @@ async function createBackup({ dir, payloadText, reason, now = new Date() }) {
   // Valid JSON is not enough: `[]` or `{"foo":1}` parse fine and hold no database.
   if (!looksLikeDatabase(parsed)) return { ok: false, reason: 'unexpected-shape' };
 
-  const meta = {
+  const body = {
     kind: 'doings-backup',
     createdAt: now.toISOString(),
     reason,
@@ -154,11 +175,34 @@ async function createBackup({ dir, payloadText, reason, now = new Date() }) {
     file = path.join(dir, name);
   }
 
-  const written = await writeAtomic(file, JSON.stringify(meta));
+  const text = JSON.stringify(body);
+  const written = await writeAtomic(file, text);
   if (!written.ok) return written;
 
+  // The sidecar comes second: a copy without it is still restorable, and the
+  // list rebuilds the missing file on its own.
+  await writeMeta(dir, name, metaFrom(body, text.length));
+
   const pruned = await prune(dir);
-  return { ok: true, name, createdAt: meta.createdAt, reason, removed: pruned.removed };
+  return { ok: true, name, createdAt: body.createdAt, reason, removed: pruned.removed };
+}
+
+/** The facts the settings list needs, without the database itself. */
+function metaFrom(body, size) {
+  return {
+    kind: 'doings-backup-meta',
+    createdAt: body.createdAt,
+    reason: body.reason,
+    schemaVersion: body.schemaVersion,
+    revision: body.revision,
+    counts: body.counts,
+    payloadHash: body.payloadHash,
+    size,
+  };
+}
+
+async function writeMeta(dir, name, meta) {
+  return writeAtomic(path.join(dir, metaNameFor(name)), JSON.stringify(meta));
 }
 
 /**
@@ -176,7 +220,8 @@ async function listBackups(dir) {
 
   const items = [];
   for (const name of names) {
-    if (!name.endsWith('.json') || !isSafeBackupName(name)) continue;
+    // Sidecars are not entries of their own.
+    if (isMetaName(name) || !name.endsWith('.json') || !isSafeBackupName(name)) continue;
     const file = path.join(dir, name);
     let stat;
     try {
@@ -185,23 +230,11 @@ async function listBackups(dir) {
       continue;
     }
 
-    try {
-      const meta = JSON.parse(await fs.readFile(file, 'utf8'));
-      if (meta?.kind !== 'doings-backup' || !meta.payload) throw new Error('чужой формат');
-      items.push({
-        name,
-        createdAt: typeof meta.createdAt === 'string' ? meta.createdAt : stat.mtime.toISOString(),
-        reason: REASONS.has(meta.reason) ? meta.reason : 'automatic',
-        schemaVersion: typeof meta.schemaVersion === 'number' ? meta.schemaVersion : null,
-        revision: typeof meta.revision === 'number' ? meta.revision : 0,
-        counts: meta.counts ?? countEntities(meta.payload),
-        payloadHash: typeof meta.payloadHash === 'string' ? meta.payloadHash : null,
-        size: stat.size,
-        corrupt: false,
-      });
-    } catch {
-      // A copy that cannot be read is still shown, so the user can delete it.
-      items.push({
+    const meta = await readMeta(dir, name, stat);
+    items.push(
+      meta ?? {
+        // Neither the sidecar nor the copy could be read: still listed, so the
+        // user can see the problem and delete the file.
         name,
         createdAt: stat.mtime.toISOString(),
         reason: 'automatic',
@@ -211,12 +244,71 @@ async function listBackups(dir) {
         payloadHash: null,
         size: stat.size,
         corrupt: true,
-      });
-    }
+      },
+    );
   }
 
   items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return { ok: true, items };
+}
+
+/**
+ * Reads one sidecar. A missing or damaged sidecar is rebuilt from the copy
+ * itself — that is the only case where the database is read for the list, and it
+ * happens once per file.
+ */
+async function readMeta(dir, name, stat) {
+  const metaFile = path.join(dir, metaNameFor(name));
+  try {
+    const meta = JSON.parse(await fs.readFile(metaFile, 'utf8'));
+    if (meta?.kind !== 'doings-backup-meta' || typeof meta.createdAt !== 'string') {
+      throw new Error('чужой формат');
+    }
+    return {
+      name,
+      createdAt: meta.createdAt,
+      reason: REASONS.has(meta.reason) ? meta.reason : 'automatic',
+      schemaVersion: typeof meta.schemaVersion === 'number' ? meta.schemaVersion : null,
+      revision: typeof meta.revision === 'number' ? meta.revision : 0,
+      counts: meta.counts ?? null,
+      payloadHash: typeof meta.payloadHash === 'string' ? meta.payloadHash : null,
+      size: typeof meta.size === 'number' ? meta.size : stat.size,
+      corrupt: false,
+    };
+  } catch {
+    return rebuildMeta(dir, name, stat);
+  }
+}
+
+async function rebuildMeta(dir, name, stat) {
+  let body;
+  let text;
+  try {
+    text = await fs.readFile(path.join(dir, name), 'utf8');
+    body = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (body?.kind !== 'doings-backup' || !looksLikeDatabase(body.payload)) return null;
+
+  const meta = metaFrom(
+    {
+      createdAt: typeof body.createdAt === 'string' ? body.createdAt : stat.mtime.toISOString(),
+      reason: REASONS.has(body.reason) ? body.reason : 'automatic',
+      schemaVersion: typeof body.schemaVersion === 'number' ? body.schemaVersion : null,
+      revision: typeof body.revision === 'number' ? body.revision : 0,
+      counts: body.counts ?? countEntities(body.payload),
+      payloadHash:
+        typeof body.payloadHash === 'string'
+          ? body.payloadHash
+          : hashPayload(JSON.stringify(body.payload)),
+    },
+    text.length,
+  );
+  // Written back, so the next list is cheap again.
+  await writeMeta(dir, name, meta);
+  const { kind: _kind, ...facts } = meta;
+  return { name, ...facts, corrupt: false };
 }
 
 /** Full contents of one copy, for a restore. */
@@ -253,6 +345,8 @@ async function deleteBackup(dir, name) {
   if (!file) return { ok: false, reason: 'bad-name' };
   try {
     await fs.rm(file);
+    // The sidecar goes with it, otherwise the folder fills up with orphans.
+    await fs.rm(path.join(dir, metaNameFor(name)), { force: true });
     return { ok: true };
   } catch (error) {
     return { ok: false, reason: 'io', detail: String(error) };
@@ -319,6 +413,8 @@ module.exports = {
   hashPayload,
   isSafeBackupName,
   listBackups,
+  looksLikeDatabase,
+  metaNameFor,
   prune,
   readBackup,
   shouldAutoBackup,

@@ -87,10 +87,49 @@ describe('создание копий', () => {
       'null',
       '{"state":{}}',
       '{"state":{"db":{}}}',
+      '{"version":1,"state":[]}',
+      '{"version":1,"state":{"db":[]}}',
     ]) {
       expect(
         await backups.createBackup({ dir, payloadText: text, reason: 'manual' }),
         text,
+      ).toEqual({ ok: false, reason: 'unexpected-shape' });
+    }
+    expect(await readdir(dir).catch(() => [])).toHaveLength(0);
+  });
+
+  it('без числового version копия не создаётся', async () => {
+    for (const version of [undefined, '1', null, {}]) {
+      const broken = JSON.parse(payload());
+      if (version === undefined) delete broken.version;
+      else broken.version = version;
+      expect(
+        await backups.createBackup({ dir, payloadText: JSON.stringify(broken), reason: 'manual' }),
+        String(version),
+      ).toEqual({ ok: false, reason: 'unexpected-shape' });
+    }
+    expect(await readdir(dir).catch(() => [])).toHaveLength(0);
+  });
+
+  it('без любого обязательного массива копия не создаётся', async () => {
+    for (const key of ['todos', 'projects', 'areas', 'headings', 'tags']) {
+      const missing = JSON.parse(payload());
+      delete missing.state.db[key];
+      expect(
+        await backups.createBackup({ dir, payloadText: JSON.stringify(missing), reason: 'manual' }),
+        `нет ${key}`,
+      ).toEqual({ ok: false, reason: 'unexpected-shape' });
+
+      // A value of the wrong type is refused just as firmly.
+      const wrongType = JSON.parse(payload());
+      wrongType.state.db[key] = { длина: 0 };
+      expect(
+        await backups.createBackup({
+          dir,
+          payloadText: JSON.stringify(wrongType),
+          reason: 'manual',
+        }),
+        `${key} не массив`,
       ).toEqual({ ok: false, reason: 'unexpected-shape' });
     }
     expect(await readdir(dir).catch(() => [])).toHaveLength(0);
@@ -291,6 +330,87 @@ describe('повреждённые копии', () => {
 
     expect(await backups.deleteBackup(dir, created.name)).toEqual({ ok: true });
     expect((await backups.listBackups(dir)).items).toHaveLength(0);
+  });
+});
+
+describe('метаданные рядом с копией', () => {
+  it('создание кладёт метафайл рядом', async () => {
+    const created = await backups.createBackup({ dir, payloadText: payload(3), reason: 'manual' });
+
+    const names = await readdir(dir);
+    expect(names).toContain(created.name);
+    expect(names).toContain(backups.metaNameFor(created.name));
+  });
+
+  it('список не читает сами базы', async () => {
+    const created = await backups.createBackup({ dir, payloadText: payload(5), reason: 'manual' });
+    // Ruining the payload while leaving the sidecar intact: if the list still
+    // reports the right numbers, it never opened the database.
+    await writeFile(path.join(dir, created.name), 'МУСОР, НЕ JSON', 'utf8');
+
+    const { items } = await backups.listBackups(dir);
+    expect(items).toHaveLength(1);
+    expect(items[0].corrupt).toBe(false);
+    expect(items[0].counts).toMatchObject({ todos: 5, projects: 1 });
+    expect(items[0].reason).toBe('manual');
+  });
+
+  it('пропавший метафайл восстанавливается из копии', async () => {
+    const created = await backups.createBackup({ dir, payloadText: payload(4), reason: 'import' });
+    await rm(path.join(dir, backups.metaNameFor(created.name)));
+
+    const { items } = await backups.listBackups(dir);
+    expect(items[0]).toMatchObject({ reason: 'import', corrupt: false });
+    expect(items[0].counts).toMatchObject({ todos: 4 });
+    // Rebuilt on disk, so the next list is cheap again.
+    expect(await readdir(dir)).toContain(backups.metaNameFor(created.name));
+  });
+
+  it('повреждённый метафайл восстанавливается безопасно', async () => {
+    const created = await backups.createBackup({ dir, payloadText: payload(2), reason: 'clear' });
+    await writeFile(path.join(dir, backups.metaNameFor(created.name)), '{ обрубок', 'utf8');
+
+    const { items } = await backups.listBackups(dir);
+    expect(items[0]).toMatchObject({ reason: 'clear', corrupt: false });
+    expect(items[0].counts).toMatchObject({ todos: 2 });
+  });
+
+  it('без метафайла и с битой копией запись помечается повреждённой', async () => {
+    const created = await backups.createBackup({ dir, payloadText: payload(1), reason: 'manual' });
+    await rm(path.join(dir, backups.metaNameFor(created.name)));
+    await writeFile(path.join(dir, created.name), 'совсем не json', 'utf8');
+
+    const { items } = await backups.listBackups(dir);
+    expect(items[0]).toMatchObject({ name: created.name, corrupt: true });
+  });
+
+  it('удаление убирает и метафайл', async () => {
+    const created = await backups.createBackup({ dir, payloadText: payload(1), reason: 'manual' });
+
+    await backups.deleteBackup(dir, created.name);
+
+    const names = await readdir(dir);
+    expect(names).not.toContain(created.name);
+    expect(names).not.toContain(backups.metaNameFor(created.name));
+  });
+
+  it('ротация не оставляет метафайлов без копий', async () => {
+    for (let index = 0; index < 12; index += 1) {
+      const minute = String(index).padStart(2, '0');
+      await backups.createBackup({
+        dir,
+        payloadText: payload(index + 1),
+        reason: 'automatic',
+        now: at(`2026-07-28T05:${minute}:00.000Z`),
+      });
+    }
+
+    const names = await readdir(dir);
+    const copies = names.filter((name) => !name.endsWith('.meta.json'));
+    const metas = names.filter((name) => name.endsWith('.meta.json'));
+    expect(copies).toHaveLength(backups.LIMITS.automatic);
+    // One sidecar per copy, nothing left behind.
+    expect(metas.sort()).toEqual(copies.map(backups.metaNameFor).sort());
   });
 });
 

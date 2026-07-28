@@ -1,6 +1,11 @@
 import { SCHEMA_VERSION, loadDatabase } from '../domain/validate';
 import type { Database } from '../domain/types';
-import { flushPendingWrites, holdWrites, reportStorageIssue } from './persistence';
+import {
+  blockWritesPendingChoice,
+  flushPendingWrites,
+  holdWrites,
+  reportStorageIssue,
+} from './persistence';
 
 /**
  * Renderer side of the backup feature. Everything dangerous — importing,
@@ -171,13 +176,22 @@ export async function createBackupNow(): Promise<{ ok: boolean; message: string 
  */
 export function requestMigrationBackup(): Promise<void> {
   const work = (async () => {
+    // Nothing to copy in the browser or on a first run: the migrated data may be
+    // written straight away.
     if (!backupsAvailable()) return;
     const created = await createBackup('migration');
-    if (!created.ok && created.reason !== 'no-database') {
-      reportStorageIssue(
-        `Не удалось сохранить копию базы перед обновлением схемы: ${explain(created.reason)}.`,
-      );
-    }
+    if (created.ok || created.reason === 'no-database') return;
+
+    // Otherwise the old file must survive until the user says otherwise: saving
+    // the migrated database now would replace data we failed to copy.
+    blockWritesPendingChoice(
+      `Копия базы перед обновлением схемы не создана: ${explain(created.reason)}. ` +
+        'Пока данные не перезаписываются — выберите, что делать.',
+    );
+    reportStorageIssue(
+      'Старый файл базы остался нетронутым. Можно продолжить без резервной копии ' +
+        'или оставить файл как есть и сохранить его копию вручную.',
+    );
   })();
   holdWrites(work);
   return work;

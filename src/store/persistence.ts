@@ -72,6 +72,35 @@ export function blockWrites(reason: string): void {
   writesBlocked = reason;
 }
 
+/**
+ * A block the user is allowed to lift. A file written by a newer version stays
+ * blocked no matter what — overwriting it would destroy fields we cannot read —
+ * but a missing backup is a risk they may knowingly accept.
+ */
+let blockIsChoice = false;
+
+export function blockWritesPendingChoice(reason: string): void {
+  writesBlocked = reason;
+  blockIsChoice = true;
+}
+
+/** Whether writing is currently refused, and whether the user may allow it. */
+export function writeBlock(): { reason: string; canContinue: boolean } | null {
+  return writesBlocked ? { reason: writesBlocked, canContinue: blockIsChoice } : null;
+}
+
+/**
+ * Lifts a block after the user decided to go on. Only they can make that call:
+ * everything the old file holds is at stake.
+ */
+export function allowWrites(): void {
+  if (!blockIsChoice) return;
+  writesBlocked = null;
+  blockIsChoice = false;
+  lastWriteFailure = null;
+  forgetReportedErrors();
+}
+
 /** Text that survives `JSON.parse`, or null. Guards against a truncated file. */
 function readableJson(text: string | null): string | null {
   if (!text) return null;

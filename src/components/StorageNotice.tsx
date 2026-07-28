@@ -1,3 +1,4 @@
+import { allowWrites, writeBlock } from '../store/persistence';
 import { useStore } from '../store/store';
 import { Icon } from './Icon';
 
@@ -9,8 +10,14 @@ export function StorageNotice() {
   const error = useStore((s) => s.storageError);
   const issues = useStore((s) => s.storageIssues);
   const dismiss = useStore((s) => s.dismissStorageNotice);
+  const touch = useStore((s) => s.setSettings);
 
   if (!error && !issues.length) return null;
+
+  // Writing is refused and only the user can decide to go on — right now this
+  // happens when the copy taken before a schema update could not be written.
+  const block = writeBlock();
+  const choice = block?.canContinue ? block : null;
 
   return (
     <div
@@ -28,6 +35,29 @@ export function StorageNotice() {
             {issue}
           </div>
         ))}
+        {choice && (
+          <div className="notice__actions">
+            <button
+              type="button"
+              className="notice__action"
+              onClick={() => {
+                allowWrites();
+                dismiss();
+                // A state change is what makes the migrated database reach the disk.
+                touch(false);
+              }}
+            >
+              Продолжить без резервной копии
+            </button>
+            <button
+              type="button"
+              className="notice__action notice__action--quiet"
+              onClick={dismiss}
+            >
+              Не перезаписывать базу
+            </button>
+          </div>
+        )}
       </div>
       <button type="button" className="notice__close" aria-label="Скрыть" onClick={dismiss}>
         <Icon name="cross" size={12} />

@@ -332,6 +332,47 @@ describe('задержка записи до важной работы', () => {
     await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
   });
 
+  it('блокировка после неудачной копии снимается только решением пользователя', async () => {
+    const save = vi.fn().mockResolvedValue({ ok: true, revision: 1 });
+    mockDesktop({ save });
+    const {
+      appStorage,
+      allowWrites,
+      blockWritesPendingChoice,
+      writeBlock,
+      setStorageErrorHandler,
+    } = await loadModule();
+    setStorageErrorHandler((message) => errors.push(message));
+
+    blockWritesPendingChoice('Копия перед обновлением схемы не создана');
+    expect(writeBlock()).toEqual({
+      reason: 'Копия перед обновлением схемы не создана',
+      canContinue: true,
+    });
+
+    appStorage.setItem('doings.v1', { state: { db: 1 }, version: 1 } as never);
+    await vi.waitFor(() => expect(errors.join(' ')).toContain('не создана'));
+    // The old file stays as the previous version left it.
+    expect(save).not.toHaveBeenCalled();
+
+    allowWrites();
+    expect(writeBlock()).toBeNull();
+    appStorage.setItem('doings.v1', { state: { db: 2 }, version: 1 } as never);
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+  });
+
+  it('файл более новой версии остаётся заблокированным навсегда', async () => {
+    mockDesktop({ save: vi.fn().mockResolvedValue(true) });
+    const { blockWrites, allowWrites, writeBlock } = await loadModule();
+
+    blockWrites('Файл сделан более новой версией приложения');
+    expect(writeBlock()?.canContinue).toBe(false);
+
+    allowWrites();
+    // Overwriting a newer file would destroy fields this version cannot read.
+    expect(writeBlock()?.reason).toContain('более новой версией');
+  });
+
   it('сорвавшаяся работа не блокирует запись навсегда', async () => {
     const save = vi.fn().mockResolvedValue({ ok: true, revision: 1 });
     mockDesktop({ save });
