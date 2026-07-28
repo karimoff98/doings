@@ -4,15 +4,37 @@ import { SCHEMA_VERSION } from '../domain/validate';
 import {
   backupsAvailable,
   createBackup,
+  createBackupNow,
   deleteBackup,
   describeBackup,
   formatSize,
   guardBeforeDanger,
   isRestorable,
   listBackups,
+  requestMigrationBackup,
   restoreBackup,
 } from './backups';
 import type { BackupItem } from './backups';
+
+/**
+ * The storage layer is mocked so a failed write can be arranged: a copy taken
+ * after one would quietly hold yesterday's data.
+ */
+const storage = vi.hoisted(() => ({
+  flush: { ok: true } as { ok: boolean; error?: string },
+  held: [] as Promise<unknown>[],
+  issues: [] as string[],
+}));
+
+vi.mock('./persistence', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./persistence')>();
+  return {
+    ...actual,
+    flushPendingWrites: () => Promise.resolve(storage.flush),
+    holdWrites: (work: Promise<unknown>) => void storage.held.push(work),
+    reportStorageIssue: (message: string) => void storage.issues.push(message),
+  };
+});
 
 /**
  * Renderer side: the order around dangerous steps (write pending changes, copy,
@@ -101,6 +123,9 @@ function mockBridge(overrides: Partial<BridgeMock> = {}): BridgeMock {
 }
 
 beforeEach(() => {
+  storage.flush = { ok: true };
+  storage.held = [];
+  storage.issues = [];
   const values = new Map<string, string>();
   Object.defineProperty(globalThis, 'localStorage', {
     configurable: true,
@@ -192,6 +217,93 @@ describe('защита перед опасными действиями', () => 
     const confirm = vi.fn();
     expect(await guardBeforeDanger('clear', { confirm })).toBe(true);
     expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it('неудачная запись изменений не превращается в копию старого состояния', async () => {
+    const bridge = mockBridge();
+    storage.flush = { ok: false, error: 'диск переполнен' };
+    const confirm = vi.fn().mockReturnValue(false);
+
+    expect(await guardBeforeDanger('clear', { confirm })).toBe(false);
+
+    // A snapshot without the newest changes would only pretend to be a safety net.
+    expect(bridge.create).not.toHaveBeenCalled();
+    expect(confirm.mock.calls[0][0]).toContain('диск переполнен');
+  });
+
+  it('после неудачной записи пользователь может продолжить осознанно', async () => {
+    const bridge = mockBridge();
+    storage.flush = { ok: false, error: 'нет прав' };
+
+    expect(await guardBeforeDanger('import', { confirm: () => true })).toBe(true);
+    expect(bridge.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('кнопка «Создать резервную копию сейчас»', () => {
+  it('сначала записывает изменения, затем делает копию', async () => {
+    const bridge = mockBridge();
+
+    const result = await createBackupNow();
+
+    expect(result).toEqual({ ok: true, message: 'Резервная копия создана' });
+    expect(bridge.create).toHaveBeenCalledWith('manual');
+  });
+
+  it('при неудачной записи копию не создаёт и объясняет причину', async () => {
+    const bridge = mockBridge();
+    storage.flush = { ok: false, error: 'нет места на диске' };
+
+    const result = await createBackupNow();
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain('нет места на диске');
+    expect(bridge.create).not.toHaveBeenCalled();
+  });
+
+  it('сообщает, когда копию не удалось записать', async () => {
+    mockBridge({ create: vi.fn().mockResolvedValue({ ok: false, reason: 'io' }) });
+
+    const result = await createBackupNow();
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain('не удалось записать файл');
+  });
+
+  it('в браузере честно говорит, что копий нет', async () => {
+    const result = await createBackupNow();
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain('только в приложении');
+  });
+});
+
+describe('копия перед обновлением схемы', () => {
+  it('создаётся и задерживает запись до своего завершения', async () => {
+    const bridge = mockBridge();
+
+    const work = requestMigrationBackup();
+
+    // The write gate holds this promise, so nothing can replace the old file yet.
+    expect(storage.held).toHaveLength(1);
+    await work;
+    expect(bridge.create).toHaveBeenCalledWith('migration');
+    expect(storage.issues).toEqual([]);
+  });
+
+  it('о неудаче сообщает баннером', async () => {
+    mockBridge({ create: vi.fn().mockResolvedValue({ ok: false, reason: 'io' }) });
+
+    await requestMigrationBackup();
+
+    expect(storage.issues.join(' ')).toContain('перед обновлением схемы');
+  });
+
+  it('отсутствие файла базы не считается проблемой', async () => {
+    // Nothing to copy on a first run; the banner would only confuse.
+    mockBridge({ create: vi.fn().mockResolvedValue({ ok: false, reason: 'no-database' }) });
+
+    await requestMigrationBackup();
+
+    expect(storage.issues).toEqual([]);
   });
 });
 

@@ -103,6 +103,22 @@ function revisionOf(text: string): number {
 let flushAll: () => Promise<void> = async () => {};
 
 /**
+ * Work that must finish before the file may be replaced — right now that is the
+ * backup taken before a schema migration. Writes wait for it instead of racing
+ * it, so the previous version's data is copied before anything overwrites it.
+ */
+let writeGate: Promise<unknown> = Promise.resolve();
+
+export function holdWrites(work: Promise<unknown>): void {
+  writeGate = writeGate.then(() => work).catch(() => {});
+}
+
+/** Pushes a message to the banner from outside the storage layer. */
+export function reportStorageIssue(message: string): void {
+  report(message);
+}
+
+/**
  * Reason the latest write failed, or null when the disk is up to date. Kept
  * across calls on purpose: a background write that failed while nothing new is
  * pending still means the file on disk is stale.
@@ -219,6 +235,9 @@ function fileStorage(): StateStorage | null {
         reportSaveStatus('error');
         report(message);
       };
+
+      // Nothing may replace the file while a pre-migration copy is being made.
+      await writeGate;
 
       if (writesBlocked) {
         fail(writesBlocked);

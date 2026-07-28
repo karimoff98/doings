@@ -77,6 +77,25 @@ describe('создание копий', () => {
     expect(await readdir(dir).catch(() => [])).toHaveLength(0);
   });
 
+  it('корректный JSON неправильной структуры не копируется', async () => {
+    // All of these parse cleanly and hold no database at all.
+    for (const text of [
+      '[]',
+      '{"foo":1}',
+      '42',
+      '"строка"',
+      'null',
+      '{"state":{}}',
+      '{"state":{"db":{}}}',
+    ]) {
+      expect(
+        await backups.createBackup({ dir, payloadText: text, reason: 'manual' }),
+        text,
+      ).toEqual({ ok: false, reason: 'unexpected-shape' });
+    }
+    expect(await readdir(dir).catch(() => [])).toHaveLength(0);
+  });
+
   it('пустая база не копируется', async () => {
     expect(await backups.createBackup({ dir, payloadText: '', reason: 'clear' })).toEqual({
       ok: false,
@@ -242,6 +261,20 @@ describe('повреждённые копии', () => {
     expect(corrupt?.corrupt).toBe(true);
 
     expect(await backups.readBackup(dir, broken)).toEqual({ ok: false, reason: 'corrupt' });
+  });
+
+  it('файл с корректным JSON чужой структуры считается повреждённым', async () => {
+    const alien = 'database-2026-07-28T08-00-00.json';
+    // Valid JSON, but not one of our copies: restoring it makes no sense.
+    await writeFile(
+      path.join(dir, alien),
+      JSON.stringify({ state: { db: { todos: [] } } }),
+      'utf8',
+    );
+
+    const { items } = await backups.listBackups(dir);
+    expect(items.find((item) => item.name === alien)?.corrupt).toBe(true);
+    expect(await backups.readBackup(dir, alien)).toEqual({ ok: false, reason: 'corrupt' });
   });
 
   it('чужой файл в папке не ломает список', async () => {

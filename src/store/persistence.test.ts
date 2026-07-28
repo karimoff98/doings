@@ -314,6 +314,37 @@ describe('файловое хранилище', () => {
   });
 });
 
+describe('задержка записи до важной работы', () => {
+  it('ничего не пишется, пока копия перед миграцией не готова', async () => {
+    const save = vi.fn().mockResolvedValue({ ok: true, revision: 1 });
+    mockDesktop({ save });
+    const { appStorage, holdWrites } = await loadModule();
+
+    let finishBackup: () => void = () => {};
+    holdWrites(new Promise<void>((resolve) => (finishBackup = resolve)));
+
+    appStorage.setItem('doings.v1', { state: { db: 1 }, version: 1 } as never);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    // The old file must survive until the copy of it exists.
+    expect(save).not.toHaveBeenCalled();
+
+    finishBackup();
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+  });
+
+  it('сорвавшаяся работа не блокирует запись навсегда', async () => {
+    const save = vi.fn().mockResolvedValue({ ok: true, revision: 1 });
+    mockDesktop({ save });
+    const { appStorage, holdWrites } = await loadModule();
+
+    holdWrites(Promise.reject(new Error('копия не удалась')));
+
+    appStorage.setItem('doings.v1', { state: { db: 1 }, version: 1 } as never);
+    // A failed backup is reported elsewhere; the user's data still gets saved.
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+  });
+});
+
 describe('первый запуск и онбординг', () => {
   const DB = JSON.stringify({ state: { db: { todos: [] } }, version: 1, revision: 4 });
 

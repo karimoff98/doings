@@ -5,7 +5,7 @@ import type { Theme } from '../store/store';
 import { exportDatabase, pickDatabase } from '../store/backup';
 import {
   backupsAvailable,
-  createBackup,
+  createBackupNow,
   deleteBackup,
   describeBackup,
   formatSize,
@@ -15,7 +15,6 @@ import {
   restoreBackup,
 } from '../store/backups';
 import type { BackupItem } from '../store/backups';
-import { flushPendingWrites } from '../store/persistence';
 import { Icon } from './Icon';
 
 const THEMES: { value: Theme; label: string }[] = [
@@ -234,13 +233,10 @@ export function SettingsDialog() {
                   onClick={async () => {
                     setBusy(true);
                     try {
-                      // Whatever is still in the editor belongs in the copy.
-                      await flushPendingWrites();
-                      const created = await createBackup('manual');
+                      // Writes what is pending first; a stale copy is not made.
+                      const created = await createBackupNow();
                       await refreshBackups();
-                      setStatus(
-                        created.ok ? 'Резервная копия создана' : 'Не удалось создать копию',
-                      );
+                      setStatus(created.message);
                     } finally {
                       setBusy(false);
                     }

@@ -69,6 +69,17 @@ function nameFor(date) {
   return `database-${stamp}.json`;
 }
 
+/**
+ * Cheap shape check: the persisted snapshot always carries `state.db` with a
+ * list of todos. Deeper validation belongs to the renderer's validator.
+ */
+function looksLikeDatabase(parsed) {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+  const db = parsed.state?.db;
+  if (!db || typeof db !== 'object' || Array.isArray(db)) return false;
+  return Array.isArray(db.todos);
+}
+
 function countEntities(parsed) {
   const db = parsed?.state?.db ?? {};
   const size = (value) => (Array.isArray(value) ? value.length : 0);
@@ -101,6 +112,7 @@ async function writeAtomic(file, text) {
  */
 async function createBackup({ dir, payloadText, reason, now = new Date() }) {
   if (!REASONS.has(reason)) return { ok: false, reason: 'bad-reason' };
+  if (!dir) return { ok: false, reason: 'no-folder' };
   if (typeof payloadText !== 'string' || !payloadText.trim()) {
     return { ok: false, reason: 'empty-database' };
   }
@@ -112,6 +124,9 @@ async function createBackup({ dir, payloadText, reason, now = new Date() }) {
     // Copying a broken file would waste a retention slot on garbage.
     return { ok: false, reason: 'unreadable-database' };
   }
+
+  // Valid JSON is not enough: `[]` or `{"foo":1}` parse fine and hold no database.
+  if (!looksLikeDatabase(parsed)) return { ok: false, reason: 'unexpected-shape' };
 
   const meta = {
     kind: 'doings-backup',

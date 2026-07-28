@@ -1,6 +1,6 @@
 import { SCHEMA_VERSION, loadDatabase } from '../domain/validate';
 import type { Database } from '../domain/types';
-import { flushPendingWrites } from './persistence';
+import { flushPendingWrites, holdWrites, reportStorageIssue } from './persistence';
 
 /**
  * Renderer side of the backup feature. Everything dangerous — importing,
@@ -99,9 +99,23 @@ export interface GuardOptions {
 }
 
 /**
+ * Writes everything still pending. A copy made after a failed write would show
+ * the state *before* the user's latest changes, which is worse than no copy: it
+ * looks like a safety net and is not one.
+ */
+async function flushForBackup(): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const result = await flushPendingWrites();
+    return result.ok ? { ok: true } : { ok: false, error: result.error };
+  } catch (error) {
+    return { ok: false, error: String(error) };
+  }
+}
+
+/**
  * Prepares for a destructive step: pending text reaches the disk, then a dated
- * copy is made. When the copy fails the step does not happen silently — the user
- * decides whether to continue without one.
+ * copy is made. If either fails the step does not happen silently — the user is
+ * told why and decides whether to continue without a copy.
  */
 export async function guardBeforeDanger(
   reason: BackupReason,
@@ -109,11 +123,13 @@ export async function guardBeforeDanger(
 ): Promise<boolean> {
   const confirm = options.confirm ?? ((message: string) => window.confirm(message));
 
-  // Whatever is still in the editor belongs in the copy.
-  try {
-    await flushPendingWrites();
-  } catch {
-    // A failed flush is reported by the storage layer; the copy below still runs.
+  const flushed = await flushForBackup();
+  if (!flushed.ok) {
+    // No copy is made here on purpose: it would freeze a stale snapshot.
+    return confirm(
+      `Последние изменения не удалось записать на диск: ${flushed.error ?? 'причина неизвестна'}. ` +
+        'Резервная копия не создана. Продолжить всё равно?',
+    );
   }
 
   if (!backupsAvailable()) return true;
@@ -124,6 +140,47 @@ export async function guardBeforeDanger(
   return confirm(
     `Не удалось создать резервную копию: ${explain(created.reason)}. Продолжить без копии?`,
   );
+}
+
+/**
+ * The «Создать резервную копию сейчас» button. A copy is only worth making once
+ * the current state is actually on disk.
+ */
+export async function createBackupNow(): Promise<{ ok: boolean; message: string }> {
+  if (!backupsAvailable()) {
+    return { ok: false, message: 'Резервные копии доступны только в приложении для компьютера' };
+  }
+
+  const flushed = await flushForBackup();
+  if (!flushed.ok) {
+    return {
+      ok: false,
+      message: `Копия не создана: последние изменения не записаны на диск (${flushed.error ?? 'причина неизвестна'})`,
+    };
+  }
+
+  const created = await createBackup('manual');
+  return created.ok
+    ? { ok: true, message: 'Резервная копия создана' }
+    : { ok: false, message: `Не удалось создать копию: ${explain(created.reason)}` };
+}
+
+/**
+ * Copy taken before a schema migration. Writes are held until it finishes, so
+ * the file the previous version wrote cannot be replaced before it is saved.
+ */
+export function requestMigrationBackup(): Promise<void> {
+  const work = (async () => {
+    if (!backupsAvailable()) return;
+    const created = await createBackup('migration');
+    if (!created.ok && created.reason !== 'no-database') {
+      reportStorageIssue(
+        `Не удалось сохранить копию базы перед обновлением схемы: ${explain(created.reason)}.`,
+      );
+    }
+  })();
+  holdWrites(work);
+  return work;
 }
 
 /** A copy from a newer build would lose fields this version knows nothing about. */
