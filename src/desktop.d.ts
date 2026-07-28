@@ -6,6 +6,50 @@ interface AppInfo {
   packaged: boolean;
 }
 
+/** Why a backup was made; shown in the settings list. */
+type BackupReason =
+  'automatic' | 'manual' | 'import' | 'clear' | 'demo' | 'migration' | 'before-restore';
+
+interface BackupEntry {
+  /** File name inside the backups folder; the only handle the renderer gets. */
+  name: string;
+  createdAt: string;
+  reason: BackupReason;
+  /** Schema version of the copied database, null when unknown. */
+  schemaVersion: number | null;
+  revision: number;
+  counts: {
+    todos: number;
+    projects: number;
+    areas: number;
+    headings: number;
+    tags: number;
+  } | null;
+  payloadHash: string | null;
+  size: number;
+  /** The file could not be read; restoring is refused. */
+  corrupt: boolean;
+}
+
+interface BackupWriteOutcome {
+  ok: boolean;
+  name?: string;
+  createdAt?: string;
+  reason?: string;
+  detail?: string;
+  removed?: string[];
+}
+
+interface BackupReadOutcome {
+  ok: boolean;
+  /** Exact database.json contents that were copied. */
+  payload?: string;
+  createdAt?: string;
+  reason?: string;
+  schemaVersion?: number | null;
+  detail?: string;
+}
+
 interface SaveOutcome {
   ok: boolean;
   /** Monotonic revision now on disk. */
@@ -31,6 +75,13 @@ interface DesktopBridge {
   /** Called before quitting; answer with `reportFlushed`. Returns an unsubscribe. */
   onFlushRequest?: (callback: () => void) => () => void;
   reportFlushed?: (ok: boolean, error?: string) => void;
+  /** Dated copies of the database, managed entirely by the main process. */
+  backups?: {
+    list: () => Promise<{ ok: boolean; items?: BackupEntry[] }>;
+    create: (reason: BackupReason) => Promise<BackupWriteOutcome>;
+    read: (name: string) => Promise<BackupReadOutcome>;
+    remove: (name: string) => Promise<{ ok: boolean; reason?: string }>;
+  };
   storage?: {
     load: () => Promise<string | null>;
     /** Resolves to the write outcome; older builds answered with a boolean. */

@@ -20,6 +20,7 @@ import type {
   Todo,
   When,
 } from '../domain/types';
+import { createBackup } from './backups';
 import { appStorage, blockWrites, drainStorageErrors, setStorageErrorHandler } from './persistence';
 import { createDemoDatabase, createEmptyDatabase, newId } from './seed';
 
@@ -1057,6 +1058,10 @@ export const useStore = create<StoreState>()(
             storageError: message,
           } as unknown as Partial<StoreState>;
         }
+
+        // The file on disk is still the old one at this point, so this copy
+        // captures the data exactly as the previous version left it.
+        void createBackup('migration');
 
         const loaded = loadDatabase({ version: from, db: state.db });
         if (!loaded.ok) {

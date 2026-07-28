@@ -1,8 +1,21 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { quickEntryLabel, shortcutLabel } from '../domain/platform';
 import { useStore } from '../store/store';
 import type { Theme } from '../store/store';
 import { exportDatabase, pickDatabase } from '../store/backup';
+import {
+  backupsAvailable,
+  createBackup,
+  deleteBackup,
+  describeBackup,
+  formatSize,
+  guardBeforeDanger,
+  isRestorable,
+  listBackups,
+  restoreBackup,
+} from '../store/backups';
+import type { BackupItem } from '../store/backups';
+import { flushPendingWrites } from '../store/persistence';
 import { Icon } from './Icon';
 
 const THEMES: { value: Theme; label: string }[] = [
@@ -31,13 +44,21 @@ export function SettingsDialog() {
   const [status, setStatus] = useState<string | null>(null);
   const [path, setPath] = useState<string | null>(null);
   const [info, setInfo] = useState<AppInfo | null>(null);
+  const [items, setItems] = useState<BackupItem[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  /** One call for the whole list: payloads stay on disk until a restore. */
+  const refreshBackups = useCallback(async () => {
+    setItems(await listBackups());
+  }, []);
 
   useEffect(() => {
     if (!open) return;
     setStatus(null);
     void window.desktop?.storage?.path().then(setPath);
     void window.desktop?.appInfo?.().then(setInfo);
-  }, [open]);
+    void refreshBackups();
+  }, [open, refreshBackups]);
 
   if (!open) return null;
 
@@ -109,13 +130,20 @@ export function SettingsDialog() {
                   }
                   if (
                     !window.confirm(
-                      `Импорт заменит текущие данные. Отменить можно через ${shortcutLabel('Z')}. Продолжить?`,
+                      'Импорт заменит текущие данные. Перед этим будет создана резервная копия. ' +
+                        `Отменить можно через ${shortcutLabel('Z')}. Продолжить?`,
                     )
                   ) {
                     setStatus('Импорт отменён');
                     return;
                   }
+                  // Current data is copied first; a failed copy stops the import.
+                  if (!(await guardBeforeDanger('import'))) {
+                    setStatus('Импорт отменён: резервная копия не создана');
+                    return;
+                  }
                   importDatabase(result.db);
+                  await refreshBackups();
                   setStatus(result.message);
                 }}
               >
@@ -125,16 +153,22 @@ export function SettingsDialog() {
               <button
                 type="button"
                 className="settings__button settings__button--danger"
-                onClick={() => {
+                onClick={async () => {
                   if (
-                    window.confirm(
-                      'Все задачи, проекты, области и теги будут удалены. ' +
-                        `Действие можно отменить через ${shortcutLabel('Z')} до закрытия приложения.`,
+                    !window.confirm(
+                      'Все задачи, проекты, области и теги будут удалены. Перед этим будет создана ' +
+                        `резервная копия. Действие можно отменить через ${shortcutLabel('Z')} до закрытия приложения.`,
                     )
                   ) {
-                    resetToEmpty();
-                    setStatus('Все данные удалены');
+                    return;
                   }
+                  if (!(await guardBeforeDanger('clear'))) {
+                    setStatus('Очистка отменена: резервная копия не создана');
+                    return;
+                  }
+                  resetToEmpty();
+                  await refreshBackups();
+                  setStatus('Все данные удалены');
                 }}
               >
                 <Icon name="trash" size={13} />
@@ -154,7 +188,7 @@ export function SettingsDialog() {
               <button
                 type="button"
                 className="settings__button settings__button--quiet"
-                onClick={() => {
+                onClick={async () => {
                   // Replacing real data needs a warning; an empty database does not.
                   const hasData =
                     db.todos.length > 0 ||
@@ -163,11 +197,18 @@ export function SettingsDialog() {
                     db.tags.length > 0;
                   if (
                     hasData &&
-                    !window.confirm('Демонстрационные данные заменят всё, что есть. Продолжить?')
+                    !window.confirm(
+                      'Демонстрационные данные заменят всё, что есть. Перед этим будет создана резервная копия. Продолжить?',
+                    )
                   ) {
                     return;
                   }
+                  if (hasData && !(await guardBeforeDanger('demo'))) {
+                    setStatus('Загрузка примеров отменена: резервная копия не создана');
+                    return;
+                  }
                   loadDemoData();
+                  await refreshBackups();
                   setStatus('Демонстрационные данные загружены');
                 }}
               >
@@ -176,6 +217,108 @@ export function SettingsDialog() {
               </button>
             </div>
           </section>
+
+          {backupsAvailable() && (
+            <section className="settings__row settings__row--stack">
+              <div className="settings__head">
+                <div>
+                  <div className="settings__label">Резервные копии</div>
+                  <div className="settings__hint">
+                    Создаются автоматически и перед импортом, очисткой и загрузкой примеров
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="settings__button"
+                  disabled={busy}
+                  onClick={async () => {
+                    setBusy(true);
+                    try {
+                      // Whatever is still in the editor belongs in the copy.
+                      await flushPendingWrites();
+                      const created = await createBackup('manual');
+                      await refreshBackups();
+                      setStatus(
+                        created.ok ? 'Резервная копия создана' : 'Не удалось создать копию',
+                      );
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  <Icon name="moved" size={13} />
+                  Создать резервную копию сейчас
+                </button>
+              </div>
+
+              {items.length === 0 ? (
+                <p className="settings__hint" data-testid="backups-empty">
+                  Резервных копий пока нет.
+                </p>
+              ) : (
+                <ul className="backups" data-testid="backups-list">
+                  {items.map((item) => (
+                    <li key={item.name} className="backups__row">
+                      <span className="backups__main">
+                        <span className="backups__title">{describeBackup(item)}</span>
+                        <span className="backups__meta">
+                          {item.corrupt
+                            ? 'Файл повреждён — восстановление недоступно'
+                            : !isRestorable(item)
+                              ? `Схема ${item.schemaVersion} новее — нужна свежая версия приложения`
+                              : `${item.counts?.todos ?? 0} задач · ${item.counts?.projects ?? 0} проектов · ${formatSize(item.size)}`}
+                        </span>
+                      </span>
+                      <button
+                        type="button"
+                        className="settings__button"
+                        disabled={busy || !isRestorable(item)}
+                        onClick={async () => {
+                          if (
+                            !window.confirm(
+                              'Текущие данные будут заменены выбранной копией. Перед восстановлением будет создана ещё одна резервная копия.',
+                            )
+                          ) {
+                            return;
+                          }
+                          setBusy(true);
+                          try {
+                            const result = await restoreBackup(item);
+                            if (result.ok && result.db) importDatabase(result.db);
+                            await refreshBackups();
+                            setStatus(result.message);
+                          } finally {
+                            setBusy(false);
+                          }
+                        }}
+                      >
+                        Восстановить
+                      </button>
+                      <button
+                        type="button"
+                        className="settings__button settings__button--danger"
+                        aria-label={`Удалить копию: ${describeBackup(item)}`}
+                        disabled={busy}
+                        onClick={async () => {
+                          if (!window.confirm('Удалить эту резервную копию?')) return;
+                          setBusy(true);
+                          try {
+                            const removed = await deleteBackup(item.name);
+                            await refreshBackups();
+                            setStatus(removed ? 'Копия удалена' : 'Не удалось удалить копию');
+                          } finally {
+                            setBusy(false);
+                          }
+                        }}
+                      >
+                        <Icon name="trash" size={13} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
 
           <section className="settings__row">
             <div>

@@ -47,6 +47,25 @@ contextBridge.exposeInMainWorld('desktop', {
       error: typeof error === 'string' ? error.slice(0, 500) : undefined,
     });
   },
+  /**
+   * Dated copies of the database. The renderer names a reason or an existing
+   * file; paths stay in the main process, which keeps everything inside the
+   * backups folder.
+   */
+  backups: {
+    list() {
+      return ipcRenderer.invoke('backup:list');
+    },
+    create(reason) {
+      return ipcRenderer.invoke('backup:create', String(reason));
+    },
+    read(name) {
+      return ipcRenderer.invoke('backup:restore', String(name));
+    },
+    remove(name) {
+      return ipcRenderer.invoke('backup:delete', String(name));
+    },
+  },
   storage: {
     /** Whole database as JSON, or null on the very first run. */
     load() {

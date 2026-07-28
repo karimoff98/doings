@@ -719,3 +719,62 @@
   background: var(--bg-hover);
   color: var(--text-primary);
 }
+
+/* Backups: a stacked row, because the list needs the full width. */
+.settings__row--stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.settings__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.backups {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  max-height: 210px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.backups__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 2px;
+  border-bottom: 1px solid var(--line);
+}
+
+.backups__row:last-child {
+  border-bottom: none;
+}
+
+.backups__main {
+  flex: 1;
+  min-width: 0;
+}
+
+.backups__title {
+  display: block;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.backups__meta {
+  display: block;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
+.settings__button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}

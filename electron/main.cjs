@@ -1,4 +1,5 @@
 const { app, BrowserWindow, Menu, dialog, globalShortcut, ipcMain, shell } = require('electron');
+const backups = require('./backups.cjs');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 
@@ -279,13 +280,40 @@ ipcMain.handle('storage:save', (_event, json, baseRevision) => {
   return result;
 });
 
-/** Revision currently on disk; 0 when the file is absent or predates versioning. */
-async function diskRevision() {
+/** Revision in the given file contents; 0 when absent or predating versioning. */
+function revisionOf(text) {
   try {
-    const parsed = JSON.parse(await fs.readFile(databasePath(), 'utf8'));
+    const parsed = JSON.parse(text ?? '');
     return typeof parsed.revision === 'number' ? parsed.revision : 0;
   } catch {
     return 0;
+  }
+}
+
+/** Contents of the database file, or null when it is missing or unreadable. */
+async function currentDatabaseText() {
+  try {
+    return await fs.readFile(databasePath(), 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Keeps a dated copy of what is about to be replaced — but only every few hours
+ * and only when the file actually changed, so typing never triggers one.
+ */
+async function maybeAutoBackup(currentText) {
+  if (!currentText) return;
+  try {
+    const dir = backups.backupsDirFor(app.getPath('userData'));
+    const { items } = await backups.listBackups(dir);
+    const hash = backups.hashPayload(currentText);
+    if (!backups.shouldAutoBackup({ items, hash })) return;
+    await backups.createBackup({ dir, payloadText: currentText, reason: 'automatic' });
+  } catch (error) {
+    // A missing backup must never stop the user from saving their work.
+    console.error('Автоматическая резервная копия не создана:', error);
   }
 }
 
@@ -296,7 +324,10 @@ async function writeDatabase(json, baseRevision) {
     return { ok: true, revision: 0 };
   }
 
-  const onDisk = await diskRevision();
+  const currentText = await currentDatabaseText();
+  await maybeAutoBackup(currentText);
+
+  const onDisk = revisionOf(currentText);
   if (typeof baseRevision === 'number' && onDisk > baseRevision) {
     // Someone else has written since this window loaded the file — most likely
     // an old copy of the app left running after an update.
@@ -325,6 +356,31 @@ async function writeDatabase(json, baseRevision) {
     return { ok: false, reason: 'io', detail: String(error) };
   }
 }
+
+/**
+ * Backups live in one folder next to the database, and only the main process
+ * touches them: the renderer passes a reason or a file name, never a path.
+ */
+function backupsDir() {
+  return backups.backupsDirFor(app.getPath('userData'));
+}
+
+ipcMain.handle('backup:list', () => backups.listBackups(backupsDir()));
+
+ipcMain.handle('backup:create', (_event, reason) => {
+  // Copies queue behind saves: the file is read only once nothing is writing it.
+  const result = saveQueue.then(async () => {
+    const payloadText = await currentDatabaseText();
+    if (!payloadText) return { ok: false, reason: 'no-database' };
+    return backups.createBackup({ dir: backupsDir(), payloadText, reason });
+  });
+  saveQueue = result.catch(() => {});
+  return result;
+});
+
+ipcMain.handle('backup:restore', (_event, name) => backups.readBackup(backupsDir(), name));
+
+ipcMain.handle('backup:delete', (_event, name) => backups.deleteBackup(backupsDir(), name));
 
 ipcMain.handle('app:info', () => ({
   version: app.getVersion(),
