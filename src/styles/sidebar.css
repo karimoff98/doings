@@ -174,3 +174,49 @@
 .srow--dragging {
   opacity: 0.4;
 }
+
+.save-status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 4px;
+  font-size: 11.5px;
+  white-space: nowrap;
+  color: var(--text-tertiary);
+}
+
+.save-status__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentcolor;
+  opacity: 0.55;
+}
+
+.save-status--saving .save-status__dot {
+  animation: save-pulse 1s var(--ease) infinite;
+}
+
+.save-status--error {
+  color: var(--danger, #d0342c);
+}
+
+.save-status--error .save-status__dot {
+  opacity: 1;
+}
+
+@keyframes save-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .save-status--saving .save-status__dot {
+    animation: none;
+  }
+}

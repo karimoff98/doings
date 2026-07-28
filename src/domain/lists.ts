@@ -30,6 +30,14 @@ export const SMART_LIST_META: Record<SmartList, Omit<ListMeta, 'key'>> = {
   trash: { title: 'Корзина', icon: 'trash', accent: 'var(--c-trash)' },
 };
 
+/** Shown wherever a project has no name yet, so it is never an empty row. */
+export const UNTITLED_PROJECT = 'Проект без названия';
+
+/** A project's display name, with a fallback for blank titles. */
+export function projectTitle(project: { title: string }): string {
+  return project.title.trim() || UNTITLED_PROJECT;
+}
+
 const byIndex = (a: { index: number }, b: { index: number }) => a.index - b.index;
 
 function isLive(item: { status: string; trashed: boolean }): boolean {
@@ -133,7 +141,7 @@ function groupByContainer(db: Database, todos: Todo[]): Section[] {
     if (list?.length) {
       sections.push({
         id: `project:${project.id}`,
-        title: project.title,
+        title: projectTitle(project),
         rows: todoRows(list),
         container: { projectId: project.id },
         reorderable: true,

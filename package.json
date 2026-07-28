@@ -1,7 +1,7 @@
 {
   "name": "doings",
   "private": true,
-  "version": "0.1.4",
+  "version": "0.1.5",
   "type": "module",
   "description": "Things 3 style task manager. Desktop app for macOS and Windows.",
   "license": "MIT",

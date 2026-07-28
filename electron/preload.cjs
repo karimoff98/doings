@@ -28,13 +28,40 @@ contextBridge.exposeInMainWorld('desktop', {
   focusWindow() {
     ipcRenderer.send('window:focus');
   },
+  /** Version, architecture and packaging of the running build. */
+  appInfo() {
+    return ipcRenderer.invoke('app:info');
+  },
+  /**
+   * The main process asks for a flush before quitting; the renderer must answer
+   * with `reportFlushed`, otherwise the app waits for the timeout.
+   */
+  onFlushRequest(callback) {
+    const handler = () => callback();
+    ipcRenderer.on('storage:flush', handler);
+    return () => ipcRenderer.removeListener('storage:flush', handler);
+  },
+  reportFlushed(ok, error) {
+    ipcRenderer.send('storage:flushed', {
+      ok: Boolean(ok),
+      error: typeof error === 'string' ? error.slice(0, 500) : undefined,
+    });
+  },
   storage: {
     /** Whole database as JSON, or null on the very first run. */
     load() {
       return ipcRenderer.invoke('storage:load');
     },
-    save(json) {
-      return ipcRenderer.invoke('storage:save', typeof json === 'string' ? json : '');
+    save(json, baseRevision) {
+      return ipcRenderer.invoke(
+        'storage:save',
+        typeof json === 'string' ? json : '',
+        typeof baseRevision === 'number' ? baseRevision : undefined,
+      );
+    },
+    /** Opens the data folder in Finder/Explorer with the database selected. */
+    reveal() {
+      ipcRenderer.send('storage:reveal');
     },
     /** Path of the database file, shown in the settings. */
     path() {

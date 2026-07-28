@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatDayShort } from '../domain/dates';
+import { projectTitle } from '../domain/lists';
 import { describeRepeat } from '../domain/repeat';
 import type { Todo } from '../domain/types';
 import { useStore } from '../store/store';
@@ -59,9 +60,14 @@ export function TaskEditor({ todo }: TaskEditorProps) {
     clearAutoPanel();
   }, [autoPanel, clearAutoPanel]);
 
-  const db = useStore((s) => s.db);
+  // Narrow selectors: the editor must not re-render on every unrelated change
+  // to the database, only when the pieces it actually shows move.
+  const projects = useStore((s) => s.db.projects);
+  const areas = useStore((s) => s.db.areas);
+  const headings = useStore((s) => s.db.headings);
+  const allTags = useStore((s) => s.db.tags);
   const isFresh = useStore((s) => s.freshTodoId === todo.id);
-  const updateTodo = useStore((s) => s.updateTodo);
+  const commitTodoText = useStore((s) => s.commitTodoText);
   const setWhen = useStore((s) => s.setWhen);
   const setDeadline = useStore((s) => s.setDeadline);
   const setRepeat = useStore((s) => s.setRepeat);
@@ -79,6 +85,56 @@ export function TaskEditor({ todo }: TaskEditorProps) {
   const updateChecklistItem = useStore((s) => s.updateChecklistItem);
   const removeChecklistItem = useStore((s) => s.removeChecklistItem);
 
+  /**
+   * Title and notes live locally while the user types: every keystroke would
+   * otherwise rewrite the whole database, serialize it and re-render the list.
+   * The text lands in the store on a short debounce, on blur, and on close.
+   */
+  const [title, setTitle] = useState(todo.title);
+  const [notes, setNotes] = useState(todo.notes);
+  const local = useRef({ title: todo.title, notes: todo.notes });
+  local.current = { title, notes };
+  // Latest committed values, so a flush knows what actually changed.
+  const stored = useRef({ id: todo.id, title: todo.title, notes: todo.notes });
+  stored.current = { id: todo.id, title: todo.title, notes: todo.notes };
+  const debounce = useRef<number | undefined>(undefined);
+
+  const flushText = useCallback(() => {
+    if (debounce.current) {
+      window.clearTimeout(debounce.current);
+      debounce.current = undefined;
+    }
+    const patch: { title?: string; notes?: string } = {};
+    if (local.current.title !== stored.current.title) patch.title = local.current.title;
+    if (local.current.notes !== stored.current.notes) patch.notes = local.current.notes;
+    if (patch.title !== undefined || patch.notes !== undefined) {
+      commitTodoText(stored.current.id, patch);
+    }
+  }, [commitTodoText]);
+
+  const scheduleFlush = useCallback(() => {
+    if (debounce.current) window.clearTimeout(debounce.current);
+    debounce.current = window.setTimeout(flushText, 350);
+  }, [flushText]);
+
+  // Whatever is pending must reach the store before the card goes away.
+  useEffect(() => flushText, [flushText]);
+
+  // Adopt an external change (rare: undo closes the editor) only when the user
+  // has nothing half-typed here.
+  useEffect(() => {
+    if (!debounce.current) setTitle(todo.title);
+  }, [todo.title]);
+  useEffect(() => {
+    if (!debounce.current) setNotes(todo.notes);
+  }, [todo.notes]);
+
+  /** Text must be saved before closeEditor runs: it deletes a still-blank todo. */
+  const commitAndClose = useCallback(() => {
+    flushText();
+    closeEditor();
+  }, [flushText, closeEditor]);
+
   // Clicking anywhere outside the card commits and closes, like Things does.
   useEffect(() => {
     const onPointerDown = (event: MouseEvent) => {
@@ -88,26 +144,26 @@ export function TaskEditor({ todo }: TaskEditorProps) {
         // land on the wrong row. Pick up the intended row right here.
         const row = (event.target as HTMLElement | null)?.closest?.('[data-todo-id]');
         const id = row?.getAttribute('data-todo-id');
-        closeEditor();
+        commitAndClose();
         if (id && id !== todo.id) selectTodo(id);
       }
     };
     document.addEventListener('mousedown', onPointerDown);
     return () => document.removeEventListener('mousedown', onPointerDown);
-  }, [closeEditor, selectTodo, todo.id, panel, moveDialogOpen]);
+  }, [commitAndClose, selectTodo, todo.id, panel, moveDialogOpen]);
 
   const when = whenLabel(todo);
-  const project = todo.projectId ? db.projects.find((p) => p.id === todo.projectId) : undefined;
-  const area = todo.areaId ? db.areas.find((a) => a.id === todo.areaId) : undefined;
-  const heading = todo.headingId ? db.headings.find((h) => h.id === todo.headingId) : undefined;
+  const project = todo.projectId ? projects.find((p) => p.id === todo.projectId) : undefined;
+  const area = todo.areaId ? areas.find((a) => a.id === todo.areaId) : undefined;
+  const heading = todo.headingId ? headings.find((h) => h.id === todo.headingId) : undefined;
   const tags = todo.tagIds
-    .map((id) => db.tags.find((t) => t.id === id))
+    .map((id) => allTags.find((t) => t.id === id))
     .filter((tag): tag is NonNullable<typeof tag> => Boolean(tag));
 
   const containerLabel = project
     ? heading
-      ? `${project.title} › ${heading.title}`
-      : project.title
+      ? `${projectTitle(project)} › ${heading.title}`
+      : projectTitle(project)
     : area?.title;
 
   return (
@@ -118,7 +174,7 @@ export function TaskEditor({ todo }: TaskEditorProps) {
       onKeyDown={(event) => {
         if (event.key === 'Escape') {
           event.stopPropagation();
-          closeEditor();
+          commitAndClose();
         }
       }}
     >
@@ -133,14 +189,18 @@ export function TaskEditor({ todo }: TaskEditorProps) {
         <AutoTextarea
           className="editor__title"
           placeholder="Новая задача"
-          value={todo.title}
+          value={title}
           autoFocusEnd={isFresh}
           aria-label="Название задачи"
-          onChange={(event) => updateTodo(todo.id, { title: event.target.value })}
+          onChange={(event) => {
+            setTitle(event.target.value);
+            scheduleFlush();
+          }}
+          onBlur={flushText}
           onKeyDown={(event) => {
             if (event.key === 'Enter') {
               event.preventDefault();
-              closeEditor();
+              commitAndClose();
             }
           }}
         />
@@ -149,9 +209,13 @@ export function TaskEditor({ todo }: TaskEditorProps) {
       <AutoTextarea
         className="editor__notes"
         placeholder="Заметки"
-        value={todo.notes}
+        value={notes}
         aria-label="Заметки"
-        onChange={(event) => updateTodo(todo.id, { notes: event.target.value })}
+        onChange={(event) => {
+          setNotes(event.target.value);
+          scheduleFlush();
+        }}
+        onBlur={flushText}
       />
 
       {todo.checklist.length > 0 && (
@@ -348,10 +412,10 @@ export function TaskEditor({ todo }: TaskEditorProps) {
           <TagPopover
             open={panel === 'tags'}
             onClose={() => setPanel('none')}
-            tags={db.tags}
+            tags={allTags}
             selected={todo.tagIds}
             onToggle={(tagId) => toggleTag(todo.id, tagId)}
-            onCreate={(title) => toggleTag(todo.id, createTag(title))}
+            onCreate={(name) => toggleTag(todo.id, createTag(name))}
           />
         </span>
 

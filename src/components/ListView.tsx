@@ -1,7 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent, MouseEvent } from 'react';
 import { formatDayShort } from '../domain/dates';
-import { SMART_LIST_META, listTitle, projectProgress, selectSections } from '../domain/lists';
+import {
+  SMART_LIST_META,
+  listTitle,
+  projectProgress,
+  projectTitle,
+  selectSections,
+} from '../domain/lists';
 import { parseListKey } from '../domain/types';
 import type { Database, Id, Section, Tag } from '../domain/types';
 import { useStore } from '../store/store';
@@ -108,10 +114,21 @@ export function ListView() {
   const [tagMenu, setTagMenu] = useState<{ at: MenuPosition; tag: Tag } | null>(null);
 
   const list = parseListKey(selectedList);
-  const allSections: Section[] = selectSections(db, selectedList);
-  const availableTags = tagsInSections(db, allSections);
-  const activeFilter = tagFilter.filter((id) => availableTags.some((tag) => tag.id === id));
-  const sections = applyTagFilter(allSections, activeFilter);
+  // Deriving the sections walks the whole database, so it must not run on every
+  // click or drag — only when the data or the chosen list actually changes.
+  const allSections = useMemo<Section[]>(
+    () => selectSections(db, selectedList),
+    [db, selectedList],
+  );
+  const availableTags = useMemo(() => tagsInSections(db, allSections), [db, allSections]);
+  const activeFilter = useMemo(
+    () => tagFilter.filter((id) => availableTags.some((tag) => tag.id === id)),
+    [tagFilter, availableTags],
+  );
+  const sections = useMemo(
+    () => applyTagFilter(allSections, activeFilter),
+    [allSections, activeFilter],
+  );
   const options = rowOptions(list.kind);
   const hasRows = sections.some((section) => section.rows.length > 0);
   const visibleIds = sections.flatMap((section) =>
@@ -271,7 +288,7 @@ export function ListView() {
                     return (
                       <ProjectRow
                         key={row.project.id}
-                        title={row.project.title}
+                        title={projectTitle(row.project)}
                         progress={projectProgress(db, row.project.id)}
                         openCount={row.openCount}
                         projectId={row.project.id}

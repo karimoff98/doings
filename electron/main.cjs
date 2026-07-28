@@ -19,6 +19,53 @@ function send(command) {
 /** Set by the renderer once its command listener is mounted. */
 let rendererReady = false;
 let waitingForRenderer = [];
+/** True once the pending changes are safely on disk (or the user insisted). */
+let quitApproved = false;
+const FLUSH_TIMEOUT_MS = 5000;
+
+/** Asks the renderer to write everything out; resolves with the outcome. */
+function requestFlush(target) {
+  return new Promise((resolve) => {
+    const finish = (result) => {
+      clearTimeout(timer);
+      ipcMain.removeListener('storage:flushed', onFlushed);
+      resolve(result);
+    };
+    const onFlushed = (event, payload) => {
+      if (event.sender !== target.webContents) return;
+      finish(payload?.ok ? { ok: true } : { ok: false, detail: payload?.error });
+    };
+    const timer = setTimeout(
+      () => finish({ ok: false, detail: 'Сохранение не завершилось за 5 секунд.' }),
+      FLUSH_TIMEOUT_MS,
+    );
+    ipcMain.on('storage:flushed', onFlushed);
+    target.webContents.send('storage:flush');
+  });
+}
+
+/**
+ * Quits only after a successful flush. If saving failed, the user decides
+ * whether losing the last changes is acceptable.
+ */
+async function flushThenQuit(target) {
+  const result = await requestFlush(target);
+  if (!result.ok) {
+    const { response } = await dialog.showMessageBox(target, {
+      type: 'warning',
+      buttons: ['Выйти всё равно', 'Отмена'],
+      defaultId: 1,
+      cancelId: 1,
+      message: 'Последние изменения не сохранены',
+      detail:
+        `${result.detail ?? 'Запись на диск не удалась.'}\n\n` +
+        'Можно отменить выход, сохранить копию базы через настройки и разобраться с причиной.',
+    });
+    if (response === 1) return;
+  }
+  quitApproved = true;
+  app.quit();
+}
 
 ipcMain.on('renderer:ready', (event) => {
   if (mainWindow && event.sender === mainWindow.webContents) {
@@ -224,33 +271,71 @@ ipcMain.handle('storage:load', async () => {
  */
 let saveQueue = Promise.resolve();
 
-ipcMain.handle('storage:save', (_event, json) => {
-  if (typeof json !== 'string') return false;
-  const result = saveQueue.then(() => writeDatabase(json));
+ipcMain.handle('storage:save', (_event, json, baseRevision) => {
+  if (typeof json !== 'string') return { ok: false, reason: 'bad-payload' };
+  const result = saveQueue.then(() => writeDatabase(json, baseRevision));
   // A rejected write must not poison the queue for the next save.
   saveQueue = result.catch(() => {});
   return result;
 });
 
-async function writeDatabase(json) {
+/** Revision currently on disk; 0 when the file is absent or predates versioning. */
+async function diskRevision() {
+  try {
+    const parsed = JSON.parse(await fs.readFile(databasePath(), 'utf8'));
+    return typeof parsed.revision === 'number' ? parsed.revision : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function writeDatabase(json, baseRevision) {
   const file = databasePath();
   if (!json) {
     await fs.rm(file, { force: true });
-    return true;
+    return { ok: true, revision: 0 };
   }
+
+  const onDisk = await diskRevision();
+  if (typeof baseRevision === 'number' && onDisk > baseRevision) {
+    // Someone else has written since this window loaded the file — most likely
+    // an old copy of the app left running after an update.
+    console.warn(`Отклонена запись: на диске ревизия ${onDisk}, у окна ${baseRevision}`);
+    return { ok: false, reason: 'conflict', revision: onDisk };
+  }
+
+  const revision = onDisk + 1;
+  let payload = json;
+  try {
+    payload = JSON.stringify({ ...JSON.parse(json), revision });
+  } catch {
+    // Not our shape: store it as it came, without a revision stamp.
+  }
+
   // A unique temp name per write, so nothing can clash even across windows.
   const temp = `${file}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   try {
-    await fs.writeFile(temp, json, 'utf8');
+    await fs.writeFile(temp, payload, 'utf8');
     await fs.copyFile(file, `${file}.bak`).catch(() => {});
     await fs.rename(temp, file);
-    return true;
+    return { ok: true, revision };
   } catch (error) {
     console.error('Не удалось сохранить базу:', error);
     await fs.rm(temp, { force: true }).catch(() => {});
-    return false;
+    return { ok: false, reason: 'io', detail: String(error) };
   }
 }
+
+ipcMain.handle('app:info', () => ({
+  version: app.getVersion(),
+  arch: process.arch,
+  platform: process.platform,
+  packaged: app.isPackaged,
+}));
+
+ipcMain.on('storage:reveal', () => {
+  shell.showItemInFolder(databasePath());
+});
 
 ipcMain.handle('storage:path', () => databasePath());
 
@@ -437,6 +522,21 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.on('will-quit', () => globalShortcut.unregisterAll());
+
+  /**
+   * ⌘Q must not outrun the debounced write. The renderer is asked to flush
+   * everything, and only then does the app really quit.
+   */
+  app.on('before-quit', (event) => {
+    if (quitApproved) return;
+    const target = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+    if (!target || !rendererReady) {
+      quitApproved = true;
+      return;
+    }
+    event.preventDefault();
+    void flushThenQuit(target);
+  });
 
   app.on('window-all-closed', () => {
     if (!isMac) app.quit();

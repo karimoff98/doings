@@ -429,3 +429,172 @@ describe('возобновление проекта с повторяющейс�
     ).toHaveLength(обычных);
   });
 });
+
+describe('корзина и гидратация', () => {
+  /** Round-trips the database through JSON like a real restart would. */
+  function rehydrate() {
+    const snapshot = JSON.parse(JSON.stringify(store().db));
+    const loaded = parseDatabase(snapshot);
+    if (!loaded) throw new Error('база не разобралась после перезагрузки');
+    useStore.setState({ db: loaded, past: [], future: [] });
+  }
+
+  it('emptyTrash физически удаляет задачи и проекты', () => {
+    const todo = store().db.todos.find((t) => t.status === 'open')!;
+    const projectId = store().createProject({ title: 'На выброс' });
+
+    store().trashTodo(todo.id);
+    store().trashProject(projectId);
+    expect(store().db.todos.some((t) => t.id === todo.id && t.trashed)).toBe(true);
+    expect(store().db.projects.some((p) => p.id === projectId && p.trashed)).toBe(true);
+
+    store().emptyTrash();
+    // Gone from the arrays entirely, not just flagged.
+    expect(store().db.todos.some((t) => t.id === todo.id)).toBe(false);
+    expect(store().db.projects.some((p) => p.id === projectId)).toBe(false);
+  });
+
+  it('undo возвращает содержимое корзины, redo снова удаляет', () => {
+    const todo = store().db.todos.find((t) => t.status === 'open')!;
+    store().trashTodo(todo.id);
+    store().emptyTrash();
+    expect(store().db.todos.some((t) => t.id === todo.id)).toBe(false);
+
+    store().undo();
+    const restored = store().db.todos.find((t) => t.id === todo.id);
+    expect(restored).toBeDefined();
+    expect(restored?.trashed).toBe(true);
+
+    store().redo();
+    expect(store().db.todos.some((t) => t.id === todo.id)).toBe(false);
+  });
+
+  it('очистка сохраняется после повторной гидратации', () => {
+    const todo = store().db.todos.find((t) => t.status === 'open')!;
+    const projectId = store().createProject({ title: 'Больше не нужен' });
+    store().trashTodo(todo.id);
+    store().trashProject(projectId);
+    store().emptyTrash();
+
+    rehydrate();
+
+    // A restart must not resurrect anything the user threw away.
+    expect(store().db.todos.some((t) => t.id === todo.id)).toBe(false);
+    expect(store().db.projects.some((p) => p.id === projectId)).toBe(false);
+  });
+
+  it('ранее пустой проект не появляется после перезапуска', () => {
+    const projectId = store().createProject({ title: 'Пустой' });
+    store().trashProject(projectId);
+    store().emptyTrash();
+    rehydrate();
+    expect(store().db.projects.some((p) => p.id === projectId)).toBe(false);
+  });
+
+  it('кнопка очистки скрыта, когда корзина пуста', () => {
+    // The visible «Очистить корзину» button is gated on the trash having rows.
+    expect(selectSections(store().db, 'trash')).toHaveLength(0);
+
+    const todo = store().db.todos.find((t) => t.status === 'open')!;
+    store().trashTodo(todo.id);
+    expect(selectSections(store().db, 'trash').length).toBeGreaterThan(0);
+
+    store().emptyTrash();
+    expect(selectSections(store().db, 'trash')).toHaveLength(0);
+  });
+});
+
+describe('пустые проекты', () => {
+  it('новый проект создаётся без названия', () => {
+    const id = store().createProject();
+    const project = store().db.projects.find((p) => p.id === id)!;
+    expect(project.title).toBe('');
+    expect(store().draftProjectId).toBe(id);
+  });
+
+  it('нетронутый пустой проект удаляется при уходе', () => {
+    const id = store().createProject();
+    store().selectList(`project:${id}`);
+    store().selectList('today');
+    expect(store().db.projects.some((p) => p.id === id)).toBe(false);
+    expect(store().draftProjectId).toBeUndefined();
+  });
+
+  it('проект с названием остаётся при уходе', () => {
+    const id = store().createProject();
+    store().updateProject(id, { title: 'Реальный' });
+    store().selectList('today');
+    expect(store().db.projects.some((p) => p.id === id)).toBe(true);
+    expect(store().draftProjectId).toBeUndefined();
+  });
+
+  it('пустой проект с задачей не удаляется при уходе', () => {
+    const id = store().createProject();
+    store().selectList(`project:${id}`);
+    store().createTodo({ title: 'Есть дело', target: { projectId: id } });
+    store().selectList('today');
+    expect(store().db.projects.some((p) => p.id === id)).toBe(true);
+  });
+
+  it('старый импортированный пустой проект не удаляется', () => {
+    // Loaded from disk, not a session draft: it must survive navigation and
+    // simply show the fallback name instead of vanishing.
+    const id = store().createProject({ title: 'Импорт' });
+    store().updateProject(id, { title: '' });
+    store().selectList(`project:${id}`);
+    store().selectList('today');
+    expect(store().db.projects.some((p) => p.id === id)).toBe(true);
+  });
+
+  it('fallback-название подставляется в секции проекта', () => {
+    const id = store().createProject({ title: 'Импорт' });
+    store().updateProject(id, { title: '   ' });
+    store().createTodo({ title: 'Дело', target: { projectId: id } });
+    // The Anytime list groups open todos under their project heading.
+    const section = selectSections(store().db, 'anytime').find((s) => s.id === `project:${id}`);
+    expect(section).toBeDefined();
+    expect(section?.title).toBe('Проект без названия');
+  });
+});
+
+describe('коалесинг ввода в один шаг undo', () => {
+  it('весь сеанс правок текста — один шаг отмены', () => {
+    const todo = byTitle('Позвонить в сервис');
+    const before = store().past.length;
+
+    store().commitTodoText(todo.id, { title: 'Позвонить в сервис!' });
+    store().commitTodoText(todo.id, { title: 'Позвонить в сервис!!' });
+    store().commitTodoText(todo.id, { notes: 'до 18:00' });
+
+    // Three keystroke-sized commits, but only one undo step.
+    expect(store().past.length).toBe(before + 1);
+
+    store().undo();
+    const reverted = store().db.todos.find((t) => t.id === todo.id)!;
+    expect(reverted.title).toBe('Позвонить в сервис');
+    expect(reverted.notes).toBe('');
+  });
+
+  it('другое действие завершает сеанс, следующая правка — новый шаг', () => {
+    const todo = byTitle('Позвонить в сервис');
+    const before = store().past.length;
+
+    store().commitTodoText(todo.id, { title: 'Черновик' });
+    store().setWhen(todo.id, { kind: 'today' });
+    store().commitTodoText(todo.id, { title: 'Черновик 2' });
+
+    // commit + setWhen + commit = three separate steps.
+    expect(store().past.length).toBe(before + 3);
+  });
+
+  it('закрытие редактора завершает сеанс', () => {
+    const todo = byTitle('Позвонить в сервис');
+    const before = store().past.length;
+
+    store().commitTodoText(todo.id, { title: 'Один' });
+    store().closeEditor();
+    store().commitTodoText(todo.id, { title: 'Два' });
+
+    expect(store().past.length).toBe(before + 2);
+  });
+});

@@ -10,6 +10,13 @@ const THEMES: { value: Theme; label: string }[] = [
   { value: 'dark', label: 'Тёмная' },
 ];
 
+/** Turns a raw process arch into something a person recognises. */
+function archLabel(arch: string): string {
+  if (arch === 'arm64') return 'Apple Silicon (arm64)';
+  if (arch === 'x64') return 'Intel (x64)';
+  return arch;
+}
+
 export function SettingsDialog() {
   const open = useStore((s) => s.settingsOpen);
   const setSettings = useStore((s) => s.setSettings);
@@ -21,11 +28,13 @@ export function SettingsDialog() {
 
   const [status, setStatus] = useState<string | null>(null);
   const [path, setPath] = useState<string | null>(null);
+  const [info, setInfo] = useState<AppInfo | null>(null);
 
   useEffect(() => {
     if (!open) return;
     setStatus(null);
     void window.desktop?.storage?.path().then(setPath);
+    void window.desktop?.appInfo?.().then(setInfo);
   }, [open]);
 
   if (!open) return null;
@@ -74,7 +83,6 @@ export function SettingsDialog() {
             <div>
               <div className="settings__label">Данные</div>
               <div className="settings__hint">{counts}</div>
-              {path && <div className="settings__path">{path}</div>}
             </div>
             <div className="settings__actions">
               <button
@@ -136,6 +144,31 @@ export function SettingsDialog() {
               </div>
             </div>
           </section>
+
+          {info && (
+            <section className="settings__row">
+              <div>
+                <div className="settings__label">Сборка</div>
+                <div className="settings__hint">
+                  Версия {info.version} · {archLabel(info.arch)}
+                  {!info.packaged && ' · режим разработки'}
+                </div>
+                {path && <div className="settings__path">{path}</div>}
+              </div>
+              {window.desktop?.storage?.reveal && (
+                <div className="settings__actions">
+                  <button
+                    type="button"
+                    className="settings__button"
+                    onClick={() => window.desktop?.storage?.reveal?.()}
+                  >
+                    <Icon name="project" size={13} />
+                    Открыть папку с данными
+                  </button>
+                </div>
+              )}
+            </section>
+          )}
 
           {status && <p className="settings__status">{status}</p>}
 

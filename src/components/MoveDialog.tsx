@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { projectTitle } from '../domain/lists';
 import { useStore } from '../store/store';
 import type { MoveTarget } from '../store/store';
 import { Icon } from './Icon';
@@ -41,7 +42,7 @@ export function MoveDialog() {
       for (const project of projects) {
         items.push({
           key: `project:${project.id}`,
-          title: project.title,
+          title: projectTitle(project),
           sub: area.title,
           icon: 'project',
           color: 'var(--c-project)',
@@ -53,7 +54,7 @@ export function MoveDialog() {
           items.push({
             key: `heading:${heading.id}`,
             title: heading.title,
-            sub: project.title,
+            sub: projectTitle(project),
             icon: 'notes',
             target: { projectId: project.id, headingId: heading.id },
           });
@@ -65,7 +66,7 @@ export function MoveDialog() {
     )) {
       items.push({
         key: `project:${project.id}`,
-        title: project.title,
+        title: projectTitle(project),
         icon: 'project',
         color: 'var(--c-project)',
         target: { projectId: project.id },

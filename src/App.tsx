@@ -7,6 +7,7 @@ import { ShortcutsDialog } from './components/ShortcutsDialog';
 import { Sidebar } from './components/Sidebar';
 import { StorageNotice } from './components/StorageNotice';
 import { useDesktopMenu } from './hooks/useDesktopMenu';
+import { useDesktopSave } from './hooks/useDesktopSave';
 import { useKeyboard } from './hooks/useKeyboard';
 import { useReminders } from './hooks/useReminders';
 import { useStore } from './store/store';
@@ -61,6 +62,7 @@ export function App() {
   useTheme();
   useKeyboard();
   useDesktopMenu();
+  useDesktopSave();
   useReminders();
   const hydrated = useHydrated();
 

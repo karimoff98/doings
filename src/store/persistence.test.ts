@@ -208,6 +208,50 @@ describe('файловое хранилище', () => {
     expect(save).not.toHaveBeenCalled();
   });
 
+  it('запоминает ревизию файла и пишет от неё', async () => {
+    const stored = JSON.stringify({ state: { db: 1 }, version: 1, revision: 7 });
+    const save = vi.fn().mockResolvedValue({ ok: true, revision: 8 });
+    mockDesktop({ load: vi.fn().mockResolvedValue(stored), save });
+    const { appStorage } = await loadModule();
+
+    await appStorage.getItem('doings.v1');
+    appStorage.setItem('doings.v1', { state: { db: 2 }, version: 1 } as never);
+
+    // The revision read from disk travels with the write so the main process
+    // can detect an older copy trying to clobber a newer file.
+    await vi.waitFor(() => expect(save).toHaveBeenCalledWith(expect.any(String), 7));
+  });
+
+  it('на конфликте ревизий блокирует запись и сообщает', async () => {
+    const save = vi.fn().mockResolvedValue({ ok: false, reason: 'conflict', revision: 99 });
+    mockDesktop({ save });
+    const { appStorage, setStorageErrorHandler } = await loadModule();
+    setStorageErrorHandler((message) => errors.push(message));
+
+    await appStorage.getItem('doings.v1');
+    appStorage.setItem('doings.v1', { state: { db: 1 }, version: 1 } as never);
+    await vi.waitFor(() => expect(errors.join(' ')).toContain('другой копией'));
+
+    // Once a conflict is seen, further writes stay blocked rather than fighting
+    // the other copy over the file.
+    save.mockClear();
+    appStorage.setItem('doings.v1', { state: { db: 2 }, version: 1 } as never);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('принимает старый булев ответ save()', async () => {
+    const save = vi.fn().mockResolvedValue(true);
+    mockDesktop({ save });
+    const { appStorage, setStorageErrorHandler } = await loadModule();
+    setStorageErrorHandler((message) => errors.push(message));
+
+    await appStorage.getItem('doings.v1');
+    appStorage.setItem('doings.v1', { state: { db: 1 }, version: 1 } as never);
+    await vi.waitFor(() => expect(save).toHaveBeenCalled());
+    expect(errors).toEqual([]);
+  });
+
   it('обработчик, который сам пишет в хранилище, не вызывает рекурсию', async () => {
     // Так ведёт себя стор: сообщение об ошибке кладётся в состояние, а любое
     // изменение состояния просит хранилище сохраниться снова.
@@ -264,7 +308,8 @@ describe('файловое хранилище', () => {
 
     const value = await appStorage.getItem('doings.v1');
     expect(value).toEqual({ state: { db: 'старое' }, version: 1 });
-    expect(save).toHaveBeenCalledWith(legacy);
+    // A fresh file has no revision yet, so the migration writes from base 0.
+    expect(save).toHaveBeenCalledWith(legacy, 0);
     expect(localStorage.getItem('things-clone.v1')).toBeNull();
   });
 });

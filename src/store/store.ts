@@ -83,6 +83,11 @@ export interface StoreState {
 
   createTodo: (options?: { title?: string; target?: MoveTarget; when?: When }) => Id;
   updateTodo: (id: Id, patch: Partial<Omit<Todo, 'id'>>) => void;
+  /**
+   * Title/notes edits from the open editor. Coalesced into one undo step per
+   * session, so a paragraph of typing is a single ⌘Z, not one per character.
+   */
+  commitTodoText: (id: Id, patch: { title?: string; notes?: string }) => void;
   /** All mutators below take one id or many, so multi-select needs no special casing. */
   setWhen: (ids: Id | Id[], when: When) => void;
   setDeadline: (ids: Id | Id[], deadline?: IsoDay) => void;
@@ -119,6 +124,12 @@ export interface StoreState {
 
   /** Newly created project or area, so its title field can grab focus once. */
   freshListId?: Id;
+  /**
+   * A just-created project the user has not named or filled yet. Leaving it
+   * throws it away, so an abandoned "new project" never lingers as a blank row.
+   * Session-only: it is not part of the persisted state.
+   */
+  draftProjectId?: Id;
   clearFreshList: () => void;
   /** Asks the list header to focus its title, used by "Переименовать". */
   focusListTitle: (id: Id) => void;
@@ -239,8 +250,16 @@ function exposeForDebug(store: unknown) {
 export const useStore = create<StoreState>()(
   persist(
     immer((set, get) => {
+      /**
+       * Marks the current coalescing session. While it stays the same, text
+       * edits fold into one undo step; any other mutation clears it, so the
+       * next keystroke opens a fresh step.
+       */
+      let coalesceTag: string | null = null;
+
       /** Wraps a mutation so every change is undoable. */
       const mutate = (recipe: (db: Database) => void) => {
+        coalesceTag = null;
         const snapshot = get().db;
         set((state) => {
           state.past.push(snapshot);
@@ -248,6 +267,34 @@ export const useStore = create<StoreState>()(
           state.future = [];
           recipe(state.db);
         });
+      };
+
+      /**
+       * Like `mutate`, but consecutive calls sharing a tag reuse the first
+       * snapshot instead of stacking one per keystroke. Typing a title and a
+       * note in the same editor collapses into a single undoable step.
+       */
+      const mutateCoalesced = (tag: string, recipe: (db: Database) => void) => {
+        if (tag === coalesceTag) {
+          set((state) => {
+            state.future = [];
+            recipe(state.db);
+          });
+          return;
+        }
+        const snapshot = get().db;
+        coalesceTag = tag;
+        set((state) => {
+          state.past.push(snapshot);
+          if (state.past.length > UNDO_LIMIT) state.past.shift();
+          state.future = [];
+          recipe(state.db);
+        });
+      };
+
+      /** Ends the current text-editing session so the next edit is a new step. */
+      const endTextSession = () => {
+        coalesceTag = null;
       };
 
       const findTodo = (db: Database, id: Id) => db.todos.find((t) => t.id === id);
@@ -323,6 +370,20 @@ export const useStore = create<StoreState>()(
 
         selectList: (key) =>
           set((state) => {
+            // A brand-new project the user opened but never named or filled
+            // would otherwise stay behind as a blank row. Drop it on the way out.
+            const draftId = state.draftProjectId;
+            if (draftId && key !== `project:${draftId}`) {
+              const draft = state.db.projects.find((p) => p.id === draftId);
+              const abandoned =
+                draft &&
+                !draft.title.trim() &&
+                !state.db.todos.some((t) => t.projectId === draftId);
+              if (abandoned) {
+                state.db.projects = state.db.projects.filter((p) => p.id !== draftId);
+              }
+              state.draftProjectId = undefined;
+            }
             state.selectedList = key;
             state.selectedTodoId = undefined;
             state.selectionAnchor = undefined;
@@ -383,7 +444,8 @@ export const useStore = create<StoreState>()(
 
         clearAutoPanel: () => set((state) => void (state.autoPanel = undefined)),
 
-        closeEditor: () =>
+        closeEditor: () => {
+          endTextSession();
           set((state) => {
             const id = state.editingTodoId;
             state.editingTodoId = undefined;
@@ -397,7 +459,8 @@ export const useStore = create<StoreState>()(
               state.selectedTodoId = undefined;
               state.selection = [];
             }
-          }),
+          });
+        },
 
         setTheme: (theme) => set((state) => void (state.theme = theme)),
 
@@ -462,6 +525,12 @@ export const useStore = create<StoreState>()(
 
         updateTodo: (id, patch) =>
           mutate((db) => {
+            const todo = findTodo(db, id);
+            if (todo) Object.assign(todo, patch);
+          }),
+
+        commitTodoText: (id, patch) =>
+          mutateCoalesced(`text:${id}`, (db) => {
             const todo = findTodo(db, id);
             if (todo) Object.assign(todo, patch);
           }),
@@ -690,11 +759,17 @@ export const useStore = create<StoreState>()(
 
         createProject: (options) => {
           const id = newId('prj');
-          set((state) => void (state.freshListId = id));
+          const title = options?.title ?? '';
+          set((state) => {
+            state.freshListId = id;
+            // Only an unnamed project counts as a disposable draft; a project
+            // created with a title (import, duplication) is real from the start.
+            state.draftProjectId = title.trim() ? undefined : id;
+          });
           mutate((db) => {
             db.projects.push({
               id,
-              title: options?.title ?? 'Новый проект',
+              title,
               notes: '',
               areaId: options?.areaId,
               when: { kind: 'unscheduled' },
@@ -708,11 +783,18 @@ export const useStore = create<StoreState>()(
           return id;
         },
 
-        updateProject: (id, patch) =>
+        updateProject: (id, patch) => {
           mutate((db) => {
             const project = db.projects.find((p) => p.id === id);
             if (project) Object.assign(project, patch);
-          }),
+          });
+          // Once it has a real name it is no longer a throwaway draft.
+          if (typeof patch.title === 'string' && patch.title.trim()) {
+            set((state) => {
+              if (state.draftProjectId === id) state.draftProjectId = undefined;
+            });
+          }
+        },
 
         completeProject: (id) =>
           mutate((db) => {
@@ -828,6 +910,7 @@ export const useStore = create<StoreState>()(
           }),
 
         undo: () => {
+          endTextSession();
           const { past, db } = get();
           if (!past.length) return;
           const previous = past[past.length - 1];
@@ -843,6 +926,7 @@ export const useStore = create<StoreState>()(
         },
 
         redo: () => {
+          endTextSession();
           const { future, db } = get();
           if (!future.length) return;
           const next = future[future.length - 1];

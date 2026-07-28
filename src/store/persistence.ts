@@ -1,5 +1,6 @@
 import { createJSONStorage } from 'zustand/middleware';
 import type { StateStorage } from 'zustand/middleware';
+import { reportSaveStatus } from './saveStatus';
 
 /** How long we wait after the last change before touching the disk. */
 const WRITE_DELAY_MS = 250;
@@ -81,6 +82,29 @@ function readableJson(text: string | null): string | null {
   }
 }
 
+/**
+ * Revision of the database this session started from. The main process refuses
+ * to overwrite a file whose revision has moved on, which is what happens when an
+ * old copy of the app is still running after an update.
+ */
+let baseRevision: number | null = null;
+
+function revisionOf(text: string): number {
+  try {
+    const parsed = JSON.parse(text) as { revision?: unknown };
+    return typeof parsed.revision === 'number' ? parsed.revision : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** Waits until everything the user has done is on disk. Used before quitting. */
+let flushAll: () => Promise<void> = async () => {};
+
+export function flushPendingWrites(): Promise<void> {
+  return flushAll();
+}
+
 function legacyValue(name: string): string | null {
   try {
     for (const key of [name, ...LEGACY_KEYS]) {
@@ -116,18 +140,37 @@ function fileStorage(): StateStorage | null {
   let queue: Promise<void> = Promise.resolve();
 
   const write = (json: string): Promise<void> => {
+    reportSaveStatus('saving');
     queue = queue.then(async () => {
       if (writesBlocked) {
         report(writesBlocked);
+        reportSaveStatus('error');
         return;
       }
       try {
-        const ok = await api.save(json);
-        if (ok) forgetReportedErrors();
-        else {
-          report('Не удалось сохранить базу на диск. Проверьте свободное место и права доступа.');
+        const raw = await api.save(json, baseRevision ?? undefined);
+        // Older builds answered with a plain boolean.
+        const outcome = typeof raw === 'boolean' ? { ok: raw } : (raw ?? { ok: false });
+        if (outcome.ok) {
+          if (typeof outcome.revision === 'number') baseRevision = outcome.revision;
+          forgetReportedErrors();
+          reportSaveStatus('saved');
+          return;
         }
+        reportSaveStatus('error');
+        if (outcome.reason === 'conflict') {
+          // Another copy of the app owns the file now: overwriting it would
+          // silently throw away whatever that copy has saved.
+          const message =
+            'База изменена другой копией приложения. Изменения этой копии не сохраняются — ' +
+            'закройте лишнее окно приложения и запустите его заново.';
+          blockWrites(message);
+          report(message);
+          return;
+        }
+        report('Не удалось сохранить базу на диск. Проверьте свободное место и права доступа.');
       } catch (error) {
+        reportSaveStatus('error');
         report(`Не удалось сохранить базу: ${String(error)}`);
       }
     });
@@ -135,12 +178,18 @@ function fileStorage(): StateStorage | null {
   };
 
   const flush = () => {
-    if (pending === null) return;
+    if (pending === null) return queue;
     const json = pending;
     pending = null;
     if (timer) window.clearTimeout(timer);
     timer = undefined;
-    void write(json);
+    return write(json);
+  };
+
+  // Quitting must not outrun the debounce: the main process asks for this.
+  flushAll = async () => {
+    await flush();
+    await queue;
   };
 
   window.addEventListener('pagehide', flush);
@@ -190,8 +239,11 @@ function fileStorage(): StateStorage | null {
       if (stored) {
         // Broken JSON must never reach zustand: it would abort hydration and
         // leave the window empty.
-        return readableJson(stored) ?? (await rescue());
+        const usable = readableJson(stored) ?? (await rescue());
+        baseRevision = usable ? revisionOf(usable) : 0;
+        return usable;
       }
+      baseRevision = 0;
 
       // Databases created before the switch to a file still live in localStorage.
       const legacy = readableJson(legacyValue(name));
@@ -254,13 +306,16 @@ function browserStorage(): StateStorage {
     setItem: (name, value) => {
       if (writesBlocked) {
         report(writesBlocked);
+        reportSaveStatus('error');
         return;
       }
       try {
         globalThis.localStorage.setItem(name, value);
         dropLegacy();
         forgetReportedErrors();
+        reportSaveStatus('saved');
       } catch (error) {
+        reportSaveStatus('error');
         // Usually the quota: tell the user instead of losing changes quietly.
         report(`Не удалось сохранить данные в браузере: ${String(error)}`);
       }

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { SMART_LIST_META } from '../domain/lists';
+import { SMART_LIST_META, projectTitle } from '../domain/lists';
 import { SMART_LISTS } from '../domain/types';
 import type { ListKey } from '../domain/types';
 import { useStore } from '../store/store';
@@ -54,10 +54,11 @@ export function QuickFind() {
     }
 
     for (const project of db.projects.filter((p) => !p.trashed)) {
-      if (q && !project.title.toLowerCase().includes(q)) continue;
+      const name = projectTitle(project);
+      if (q && !name.toLowerCase().includes(q)) continue;
       result.push({
         key: `project:${project.id}`,
-        title: project.title,
+        title: name,
         sub: db.areas.find((a) => a.id === project.areaId)?.title,
         icon: 'project',
         color: 'var(--c-project)',
@@ -85,7 +86,7 @@ export function QuickFind() {
         result.push({
           key: `todo:${todo.id}`,
           title: todo.title || 'Без названия',
-          sub: project?.title ?? area?.title ?? 'Входящие',
+          sub: project ? projectTitle(project) : (area?.title ?? 'Входящие'),
           icon: 'check',
           list: project
             ? `project:${project.id}`

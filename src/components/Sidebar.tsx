@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { DragEvent, MouseEvent as ReactMouseEvent } from 'react';
-import { SMART_LIST_META, listCount, projectProgress } from '../domain/lists';
+import { SMART_LIST_META, listCount, projectProgress, projectTitle } from '../domain/lists';
 import type { Area, ListKey, Project, SmartList } from '../domain/types';
 import { useStore } from '../store/store';
 import { ProgressRing } from './Checkbox';
@@ -8,6 +8,7 @@ import { Icon } from './Icon';
 import type { IconName } from './Icon';
 import { Menu } from './Menu';
 import type { MenuItem, MenuPosition } from './Menu';
+import { SaveIndicator } from './SaveIndicator';
 
 const GROUPS: SmartList[][] = [
   ['inbox'],
@@ -270,11 +271,17 @@ export function Sidebar() {
     ];
   };
 
-  const activeProjects = db.projects
-    .filter((p) => p.status === 'open' && !p.trashed)
-    .sort((a, b) => a.index - b.index);
-  const looseProjects = activeProjects.filter((p) => !p.areaId);
-  const areas = [...db.areas].sort((a, b) => a.index - b.index);
+  // Project and area order changes rarely; editing a todo's notes should not
+  // make the sidebar re-sort everything it shows.
+  const activeProjects = useMemo(
+    () =>
+      db.projects
+        .filter((p) => p.status === 'open' && !p.trashed)
+        .sort((a, b) => a.index - b.index),
+    [db.projects],
+  );
+  const looseProjects = useMemo(() => activeProjects.filter((p) => !p.areaId), [activeProjects]);
+  const areas = useMemo(() => [...db.areas].sort((a, b) => a.index - b.index), [db.areas]);
 
   /** Places the dragged project next to `target`, moving it between areas if needed. */
   const dropProjectNear = (id: string, target: Project, after: boolean) => {
@@ -402,13 +409,13 @@ export function Sidebar() {
         .filter(Boolean)
         .join(' ')}
       onClick={() => selectList(`project:${project.id}`)}
-      onContextMenu={(event) => openMenu(event, project.title || 'Проект', projectMenu(project))}
+      onContextMenu={(event) => openMenu(event, projectTitle(project), projectMenu(project))}
       {...projectDragProps(project)}
     >
       <span className="srow__icon">
         <ProgressRing progress={projectProgress(db, project.id)} />
       </span>
-      <span className="srow__title">{project.title}</span>
+      <span className="srow__title">{projectTitle(project)}</span>
       {listCount(db, `project:${project.id}`) > 0 && (
         <span className="srow__count">{listCount(db, `project:${project.id}`)}</span>
       )}
@@ -534,6 +541,7 @@ export function Sidebar() {
           Область
         </button>
         <span className="sidebar__spacer" />
+        <SaveIndicator />
         <button
           type="button"
           className="sidebar__action"
