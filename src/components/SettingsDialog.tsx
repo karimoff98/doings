@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { quickEntryLabel, shortcutLabel } from '../domain/platform';
 import { useStore } from '../store/store';
 import type { Theme } from '../store/store';
 import { exportDatabase, pickDatabase } from '../store/backup';
@@ -127,7 +128,8 @@ export function SettingsDialog() {
                 onClick={() => {
                   if (
                     window.confirm(
-                      'Все задачи, проекты, области и теги будут удалены. Это действие нельзя отменить.',
+                      'Все задачи, проекты, области и теги будут удалены. ' +
+                        `Действие можно отменить через ${shortcutLabel('Z')} до закрытия приложения.`,
                     )
                   ) {
                     resetToEmpty();
@@ -179,7 +181,8 @@ export function SettingsDialog() {
             <div>
               <div className="settings__label">Быстрый ввод</div>
               <div className="settings__hint">
-                Глобальный хоткей ⌃⌥Space открывает окно быстрого ввода даже из другого приложения
+                Глобальный хоткей {quickEntryLabel()} открывает окно быстрого ввода даже из другого
+                приложения
               </div>
             </div>
           </section>
