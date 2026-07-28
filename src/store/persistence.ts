@@ -11,11 +11,37 @@ type ErrorHandler = (message: string) => void;
 
 let reportError: ErrorHandler | null = null;
 const queuedErrors: string[] = [];
+const alreadyReported = new Set<string>();
+let reporting = false;
 
-/** Storage runs before the store exists, so early messages wait in a queue. */
+/**
+ * Storage runs before the store exists, so early messages wait in a queue.
+ *
+ * Reporting writes to the store, and any store update asks the storage to save
+ * again — which can fail again. Without the guard below that becomes infinite
+ * recursion that kills the whole app, so a message is delivered once and never
+ * re-entrantly.
+ */
 function report(message: string): void {
-  if (reportError) reportError(message);
-  else queuedErrors.push(message);
+  if (reporting || alreadyReported.has(message)) return;
+  alreadyReported.add(message);
+  reporting = true;
+  try {
+    // The queue is the reliable channel: problems found while loading happen
+    // before hydration finishes, and hydration replaces the whole state.
+    queuedErrors.push(message);
+    reportError?.(message);
+  } finally {
+    reporting = false;
+  }
+}
+
+/**
+ * Messages collected so far. The store drains them while merging the loaded
+ * state, which is the only moment guaranteed not to be overwritten.
+ */
+export function drainStorageErrors(): string[] {
+  return queuedErrors.splice(0);
 }
 
 /**
@@ -24,7 +50,6 @@ function report(message: string): void {
  */
 export function setStorageErrorHandler(handler: ErrorHandler): void {
   reportError = handler;
-  for (const message of queuedErrors.splice(0)) handler(message);
 }
 
 let writesBlocked: string | null = null;

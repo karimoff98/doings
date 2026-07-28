@@ -275,3 +275,61 @@ describe('импорт базы', () => {
     expect(store().db.projects.some((p) => p.id === projectId)).toBe(true);
   });
 });
+
+describe('состояние после удалений', () => {
+  it('удаление тега уводит из его списка', () => {
+    const tagId = store().db.tags[0].id;
+    store().selectList(`tag:${tagId}`);
+
+    store().removeTag(tagId);
+
+    expect(store().selectedList).toBe('today');
+    expect(store().db.todos.every((todo) => !todo.tagIds.includes(tagId))).toBe(true);
+  });
+
+  it('удаление проекта уводит из его списка', () => {
+    const projectId = store().db.projects[0].id;
+    store().selectList(`project:${projectId}`);
+
+    store().trashProject(projectId);
+
+    expect(store().selectedList).toBe('today');
+  });
+
+  it('удаление области уводит из её списка', () => {
+    const areaId = store().db.areas[0].id;
+    store().selectList(`area:${areaId}`);
+
+    store().trashArea(areaId);
+
+    expect(store().selectedList).toBe('today');
+  });
+});
+
+describe('выделение после действий', () => {
+  it('задачи, ушедшие из списка, покидают и выделение', () => {
+    store().selectList('today');
+    const visible = selectSections(store().db, 'today').flatMap((section) =>
+      section.rows.flatMap((row) => (row.kind === 'todo' ? [row.todo.id] : [])),
+    );
+    store().selectRange(visible, visible[visible.length - 1]);
+    expect(store().selection).toHaveLength(visible.length);
+
+    // «Когда-нибудь» убирает задачи из «Сегодня»
+    store().setWhen(visible, { kind: 'someday' });
+
+    // Иначе панель пакетных действий висела бы над пустым списком.
+    expect(store().selection).toEqual([]);
+    expect(store().selectedTodoId).toBeUndefined();
+  });
+
+  it('задача, оставшаяся в списке, остаётся выделенной', () => {
+    store().selectList('anytime');
+    const todo = byTitle('Позвонить в сервис');
+    store().selectTodo(todo.id);
+
+    store().updateTodo(todo.id, { notes: 'правка' });
+
+    expect(store().selection).toEqual([todo.id]);
+  });
+});

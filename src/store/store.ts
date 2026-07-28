@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import { tomorrow } from '../domain/dates';
+import { selectSections } from '../domain/lists';
 import { nextRepeatCopy } from '../domain/repeat';
 import { SCHEMA_VERSION, loadDatabase, validateDatabase } from '../domain/validate';
 import { parseListKey } from '../domain/types';
@@ -19,7 +20,7 @@ import type {
   Todo,
   When,
 } from '../domain/types';
-import { appStorage, blockWrites, setStorageErrorHandler } from './persistence';
+import { appStorage, blockWrites, drainStorageErrors, setStorageErrorHandler } from './persistence';
 import { createSeedDatabase, newId } from './seed';
 
 export type Theme = 'system' | 'light' | 'dark';
@@ -239,13 +240,43 @@ export const useStore = create<StoreState>()(
 
       const findTodo = (db: Database, id: Id) => db.todos.find((t) => t.id === id);
 
-      /** Runs one recipe over one or many todos inside a single undo step. */
+      /**
+       * For mutations that can delete whatever the user is looking at: the
+       * selected list must never point at something that no longer exists.
+       */
+      const mutateAndKeepListValid = (recipe: (db: Database) => void) => {
+        mutate(recipe);
+        set((state) => {
+          state.selectedList = validList(state.db, state.selectedList);
+        });
+      };
+
+      /**
+       * Runs one recipe over one or many todos inside a single undo step, then
+       * drops from the selection whatever left the current list — otherwise the
+       * batch toolbar keeps hovering over rows nobody can see.
+       */
       const mutateEach = (ids: Id | Id[], recipe: (todo: Todo, db: Database) => void) => {
         const list = Array.isArray(ids) ? ids : [ids];
         mutate((db) => {
           for (const id of list) {
             const todo = findTodo(db, id);
             if (todo) recipe(todo, db);
+          }
+        });
+        set((state) => {
+          if (!state.selection.length) return;
+          const visible = new Set(
+            selectSections(state.db, state.selectedList).flatMap((section) =>
+              section.rows.flatMap((row) => (row.kind === 'todo' ? [row.todo.id] : [])),
+            ),
+          );
+          state.selection = state.selection.filter((id) => visible.has(id));
+          if (state.selectedTodoId && !visible.has(state.selectedTodoId)) {
+            state.selectedTodoId = state.selection[state.selection.length - 1];
+          }
+          if (state.selectionAnchor && !visible.has(state.selectionAnchor)) {
+            state.selectionAnchor = state.selectedTodoId;
           }
         });
       };
@@ -470,7 +501,7 @@ export const useStore = create<StoreState>()(
           }),
 
         removeTag: (id) =>
-          mutate((db) => {
+          mutateAndKeepListValid((db) => {
             db.tags = db.tags.filter((tag) => tag.id !== id);
             for (const todo of db.todos) {
               if (todo.tagIds.includes(id)) {
@@ -530,7 +561,7 @@ export const useStore = create<StoreState>()(
           }),
 
         emptyTrash: () =>
-          mutate((db) => {
+          mutateAndKeepListValid((db) => {
             db.todos = db.todos.filter((t) => !t.trashed);
             db.projects = db.projects.filter((p) => !p.trashed);
           }),
@@ -697,7 +728,7 @@ export const useStore = create<StoreState>()(
           }),
 
         trashProject: (id) =>
-          mutate((db) => {
+          mutateAndKeepListValid((db) => {
             const project = db.projects.find((p) => p.id === id);
             if (project) project.trashed = true;
             for (const todo of db.todos) {
@@ -730,7 +761,7 @@ export const useStore = create<StoreState>()(
           }),
 
         trashArea: (id) =>
-          mutate((db) => {
+          mutateAndKeepListValid((db) => {
             db.areas = db.areas.filter((a) => a.id !== id);
             for (const project of db.projects) {
               if (project.areaId === id) project.areaId = undefined;
@@ -898,9 +929,18 @@ export const useStore = create<StoreState>()(
        */
       merge: (persisted, current) => {
         const state = (persisted ?? {}) as Partial<StoreState> & { storageIssues?: string[] };
+        // Problems found while reading are collected here, because a message
+        // pushed into the state earlier would be lost when hydration replaces it.
+        const pending = drainStorageErrors()[0];
         // No database in the snapshot: either a first run, or `migrate` refused
         // to open the file and only passed the message through.
-        if (!state.db) return { ...current, ...state };
+        if (!state.db) {
+          return {
+            ...current,
+            ...state,
+            storageError: state.storageError ?? pending ?? current.storageError,
+          };
+        }
         // Only validation here: version steps already ran in `migrate` above.
         const loaded = validateDatabase(state.db);
         if (!loaded) {
@@ -912,6 +952,7 @@ export const useStore = create<StoreState>()(
             // save, so it can still be recovered by hand.
             selectedList: 'today',
             storageError:
+              pending ??
               'Файл базы повреждён и не был загружен. Открыты демонстрационные данные; прежний файл сохранится рядом как database.json.bak, из него можно восстановить данные через настройки.',
           };
         }
@@ -921,6 +962,7 @@ export const useStore = create<StoreState>()(
           db: loaded.db,
           // A stored list may point at a project that the file no longer has.
           selectedList: validList(loaded.db, state.selectedList ?? current.selectedList),
+          storageError: state.storageError ?? pending ?? current.storageError,
           storageIssues: [...(state.storageIssues ?? []), ...loaded.issues],
         };
       },

@@ -144,14 +144,51 @@ describe('файловое хранилище', () => {
     expect(save).not.toHaveBeenCalled();
   });
 
-  it('сообщения, отправленные до появления обработчика, не теряются', async () => {
-    mockDesktop({ load: vi.fn().mockRejectedValue(new Error('рано')) });
+  it('обработчик, который сам пишет в хранилище, не вызывает рекурсию', async () => {
+    // Так ведёт себя стор: сообщение об ошибке кладётся в состояние, а любое
+    // изменение состояния просит хранилище сохраниться снова.
+    const save = vi.fn().mockResolvedValue(false);
+    mockDesktop({ save });
     const { appStorage, setStorageErrorHandler } = await loadModule();
 
-    await appStorage.getItem('doings.v1');
-    // Обработчик регистрируется после создания стора, то есть позже чтения.
+    let handled = 0;
+    setStorageErrorHandler((message) => {
+      handled += 1;
+      errors.push(message);
+      appStorage.setItem('doings.v1', { state: {}, version: 1 } as never);
+    });
+
+    appStorage.setItem('doings.v1', { state: {}, version: 1 } as never);
+    await vi.waitFor(() => expect(save).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    // До исправления это уходило в бесконечный цикл и валило приложение.
+    expect(handled).toBe(1);
+  });
+
+  it('одна и та же ошибка не повторяется', async () => {
+    mockDesktop({ save: vi.fn().mockResolvedValue(true) });
+    const { appStorage, blockWrites, setStorageErrorHandler } = await loadModule();
     setStorageErrorHandler((message) => errors.push(message));
-    expect(errors.join(' ')).toContain('рано');
+    blockWrites('Файл сделан более новой версией');
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      appStorage.setItem('doings.v1', { state: { attempt }, version: 1 } as never);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+    expect(errors).toHaveLength(1);
+  });
+
+  it('сообщения, найденные при чтении, забирает стор при слиянии состояния', async () => {
+    mockDesktop({ load: vi.fn().mockRejectedValue(new Error('рано')) });
+    const { appStorage, drainStorageErrors } = await loadModule();
+
+    await appStorage.getItem('doings.v1');
+    // Гидратация заменяет состояние целиком, поэтому сообщение должно ждать
+    // в очереди, а не выставляться в стор до слияния.
+    const drained = drainStorageErrors();
+    expect(drained.join(' ')).toContain('рано');
+    expect(drainStorageErrors()).toEqual([]);
   });
 
   it('переносит базу из localStorage прежнего имени', async () => {
