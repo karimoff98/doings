@@ -8,8 +8,25 @@ export function newId(prefix = 'id'): string {
   return `${prefix}_${Date.now().toString(36)}${counter.toString(36)}${random}`;
 }
 
-/** First-run content, so the app never opens completely empty. */
-export function createSeedDatabase(): Database {
+/**
+ * A valid but completely empty database. This is what a new installation gets:
+ * someone else's example projects are not the user's data.
+ */
+export function createEmptyDatabase(): Database {
+  return {
+    areas: [],
+    projects: [],
+    headings: [],
+    todos: [],
+    tags: [],
+  };
+}
+
+/**
+ * Example content for development, tests and the «Загрузить демонстрационные
+ * данные» button. Never loaded on its own.
+ */
+export function createDemoDatabase(): Database {
   const now = new Date().toISOString();
   const areaWork = newId('area');
   const areaHome = newId('area');

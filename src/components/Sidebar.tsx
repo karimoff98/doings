@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { DragEvent, MouseEvent as ReactMouseEvent } from 'react';
 import { SMART_LIST_META, listCount, projectProgress, projectTitle } from '../domain/lists';
+import { shiftShortcutLabel } from '../domain/platform';
 import type { Area, ListKey, Project, SmartList } from '../domain/types';
 import { useStore } from '../store/store';
 import { ProgressRing } from './Checkbox';
@@ -472,6 +473,12 @@ export function Sidebar() {
         ))}
 
         <div className="sidebar__group">
+          {/* A clean install has nothing here; say how to start instead of showing a gap. */}
+          {!activeProjects.length && !areas.length && (
+            <p className="sidebar__empty" data-testid="sidebar-empty">
+              Проектов пока нет — создайте первый через {shiftShortcutLabel('N')}
+            </p>
+          )}
           {looseProjects.map((project) => renderProject(project, false))}
 
           {areas.map((area) => {

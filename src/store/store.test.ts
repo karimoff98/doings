@@ -10,7 +10,9 @@ const store = () => useStore.getState();
 function reset() {
   // jsdom's storage shim is minimal, so only clear it when it is real.
   globalThis.localStorage?.clear?.();
-  store().resetToSeed();
+  // Most cases below need something to work with, so they ask for the examples
+  // explicitly — the app itself now starts empty.
+  store().loadDemoData();
   useStore.setState({
     selectedList: 'today',
     selection: [],
@@ -596,5 +598,88 @@ describe('коалесинг ввода в один шаг undo', () => {
     store().commitTodoText(todo.id, { title: 'Два' });
 
     expect(store().past.length).toBe(before + 2);
+  });
+});
+
+describe('чистая установка и сохранность данных', () => {
+  /** Round-trips the database through JSON like a restart would. */
+  function rehydrate() {
+    const snapshot = JSON.parse(JSON.stringify(store().db));
+    const loaded = parseDatabase(snapshot);
+    if (!loaded) throw new Error('база не разобралась после перезапуска');
+    useStore.setState({ db: loaded, past: [], future: [] });
+  }
+
+  it('очистка данных оставляет пустую, но корректную базу', () => {
+    expect(store().db.projects.length).toBeGreaterThan(0);
+    store().resetToEmpty();
+
+    const db = store().db;
+    expect(db).toEqual({ todos: [], projects: [], areas: [], headings: [], tags: [] });
+    expect(parseDatabase(JSON.parse(JSON.stringify(db)))).not.toBeNull();
+    // Nothing may keep pointing into the database that was just thrown away.
+    expect(store().selection).toEqual([]);
+    expect(store().editingTodoId).toBeUndefined();
+  });
+
+  it('очистку можно отменить в рамках сеанса', () => {
+    const before = store().db.todos.length;
+    store().resetToEmpty();
+    expect(store().db.todos).toHaveLength(0);
+
+    store().undo();
+    expect(store().db.todos).toHaveLength(before);
+  });
+
+  it('обновление с существующей базой сохраняет все данные', () => {
+    const todos = store().db.todos.map((t) => t.id);
+    const projects = store().db.projects.map((p) => p.id);
+    const areas = store().db.areas.map((a) => a.id);
+
+    rehydrate();
+
+    // A new version reads the old file as is: nothing added, nothing dropped.
+    expect(store().db.todos.map((t) => t.id)).toEqual(todos);
+    expect(store().db.projects.map((p) => p.id)).toEqual(projects);
+    expect(store().db.areas.map((a) => a.id)).toEqual(areas);
+  });
+
+  it('импортированная база не подменяется пустой', () => {
+    const imported = parseDatabase(JSON.parse(JSON.stringify(store().db)));
+    if (!imported) throw new Error('демо-база не разобралась');
+    store().resetToEmpty();
+    store().importDatabase(imported);
+
+    expect(store().db.todos.length).toBeGreaterThan(0);
+    rehydrate();
+    expect(store().db.todos.length).toBeGreaterThan(0);
+  });
+
+  it('удалённые проекты не возвращаются после перезапуска', () => {
+    const project = store().db.projects[0];
+    store().trashProject(project.id);
+    store().emptyTrash();
+    expect(store().db.projects.some((p) => p.id === project.id)).toBe(false);
+
+    rehydrate();
+    // Demo content is never re-seeded, so what the user removed stays removed.
+    expect(store().db.projects.some((p) => p.id === project.id)).toBe(false);
+    expect(store().db.projects.some((p) => p.title === 'Запуск приложения')).toBe(false);
+  });
+
+  it('после очистки перезапуск не возвращает демонстрационные данные', () => {
+    store().resetToEmpty();
+    rehydrate();
+    expect(store().db.projects).toHaveLength(0);
+    expect(store().db.todos).toHaveLength(0);
+  });
+
+  it('демонстрационные данные появляются только по явному действию', () => {
+    store().resetToEmpty();
+    expect(store().db.projects).toHaveLength(0);
+
+    store().loadDemoData();
+    expect(store().db.projects.length).toBeGreaterThan(0);
+    expect(store().db.todos.length).toBeGreaterThan(0);
   });
 });

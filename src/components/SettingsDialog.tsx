@@ -24,7 +24,8 @@ export function SettingsDialog() {
   const setTheme = useStore((s) => s.setTheme);
   const db = useStore((s) => s.db);
   const importDatabase = useStore((s) => s.importDatabase);
-  const resetToSeed = useStore((s) => s.resetToSeed);
+  const resetToEmpty = useStore((s) => s.resetToEmpty);
+  const loadDemoData = useStore((s) => s.loadDemoData);
 
   const [status, setStatus] = useState<string | null>(null);
   const [path, setPath] = useState<string | null>(null);
@@ -124,14 +125,52 @@ export function SettingsDialog() {
                 type="button"
                 className="settings__button settings__button--danger"
                 onClick={() => {
-                  if (window.confirm('Заменить всё демонстрационными данными?')) {
-                    resetToSeed();
-                    setStatus('Данные сброшены');
+                  if (
+                    window.confirm(
+                      'Все задачи, проекты, области и теги будут удалены. Это действие нельзя отменить.',
+                    )
+                  ) {
+                    resetToEmpty();
+                    setStatus('Все данные удалены');
                   }
                 }}
               >
                 <Icon name="trash" size={13} />
-                Сбросить на демо
+                Очистить все данные
+              </button>
+            </div>
+          </section>
+
+          <section className="settings__row">
+            <div>
+              <div className="settings__label">Примеры</div>
+              <div className="settings__hint">
+                Несколько областей, проектов и задач, чтобы осмотреться в приложении
+              </div>
+            </div>
+            <div className="settings__actions">
+              <button
+                type="button"
+                className="settings__button settings__button--quiet"
+                onClick={() => {
+                  // Replacing real data needs a warning; an empty database does not.
+                  const hasData =
+                    db.todos.length > 0 ||
+                    db.projects.length > 0 ||
+                    db.areas.length > 0 ||
+                    db.tags.length > 0;
+                  if (
+                    hasData &&
+                    !window.confirm('Демонстрационные данные заменят всё, что есть. Продолжить?')
+                  ) {
+                    return;
+                  }
+                  loadDemoData();
+                  setStatus('Демонстрационные данные загружены');
+                }}
+              >
+                <Icon name="layers" size={13} />
+                Загрузить демонстрационные данные
               </button>
             </div>
           </section>

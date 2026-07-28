@@ -302,8 +302,8 @@ function fileStorage(): StateStorage | null {
     }
     report(
       quarantined
-        ? `Файл базы не читается. Он отложен в ${quarantined}, приложение открыто с демонстрационными данными — испорченный файл можно попробовать починить и загрузить через настройки.`
-        : 'Файл базы не читается, приложение открыто с демонстрационными данными.',
+        ? `Файл базы не читается. Он отложен в ${quarantined}, список пока пуст — испорченный файл можно попробовать починить и загрузить через настройки.`
+        : 'Файл базы не читается, данные не загружены.',
     );
     return null;
   };
@@ -388,7 +388,7 @@ function browserStorage(): StateStorage {
       const stored = legacyValue(name);
       const usable = readableJson(stored);
       if (stored && !usable) {
-        report('Сохранённые данные в браузере повреждены, открыты демонстрационные данные.');
+        report('Сохранённые данные в браузере повреждены и не были загружены.');
       }
       loadOutcome = usable ? 'existing' : stored ? 'failed' : 'empty';
       return usable;

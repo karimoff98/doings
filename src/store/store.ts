@@ -21,7 +21,7 @@ import type {
   When,
 } from '../domain/types';
 import { appStorage, blockWrites, drainStorageErrors, setStorageErrorHandler } from './persistence';
-import { createSeedDatabase, newId } from './seed';
+import { createDemoDatabase, createEmptyDatabase, newId } from './seed';
 
 export type Theme = 'system' | 'light' | 'dark';
 
@@ -159,7 +159,10 @@ export interface StoreState {
 
   undo: () => void;
   redo: () => void;
-  resetToSeed: () => void;
+  /** Wipes everything the user has, leaving a valid empty database. */
+  resetToEmpty: () => void;
+  /** Loads the example content, only ever on an explicit request. */
+  loadDemoData: () => void;
   /** Replaces everything with a database read from a file. */
   importDatabase: (db: Database) => void;
 }
@@ -303,6 +306,30 @@ export const useStore = create<StoreState>()(
         coalesceTag = null;
       };
 
+      /**
+       * Swaps the whole database and clears everything that pointed into the old
+       * one. Undo history keeps the previous database, so even a full wipe can be
+       * taken back with ⌘Z within the session.
+       */
+      const replaceDatabase = (next: Database) => {
+        endTextSession();
+        const previous = get().db;
+        set((state) => {
+          state.past.push(previous);
+          if (state.past.length > UNDO_LIMIT) state.past.shift();
+          state.future = [];
+          state.db = next;
+          state.selectedList = validList(next, state.selectedList);
+          state.selectedTodoId = undefined;
+          state.selectionAnchor = undefined;
+          state.selection = [];
+          state.editingTodoId = undefined;
+          state.freshTodoId = undefined;
+          state.draftProjectId = undefined;
+          state.tagFilter = [];
+        });
+      };
+
       const findTodo = (db: Database, id: Id) => db.todos.find((t) => t.id === id);
 
       /**
@@ -347,7 +374,9 @@ export const useStore = create<StoreState>()(
       };
 
       return {
-        db: createSeedDatabase(),
+        // A new installation starts empty; example content is a separate,
+        // explicit choice in the settings.
+        db: createEmptyDatabase(),
         past: [],
         future: [],
 
@@ -996,18 +1025,9 @@ export const useStore = create<StoreState>()(
           });
         },
 
-        resetToSeed: () =>
-          set((state) => {
-            state.db = createSeedDatabase();
-            state.past = [];
-            state.future = [];
-            state.selectedList = validList(state.db, state.selectedList);
-            state.selectedTodoId = undefined;
-            state.selectionAnchor = undefined;
-            state.selection = [];
-            state.editingTodoId = undefined;
-            state.tagFilter = [];
-          }),
+        resetToEmpty: () => replaceDatabase(createEmptyDatabase()),
+
+        loadDemoData: () => replaceDatabase(createDemoDatabase()),
       };
     }),
     {
@@ -1042,9 +1062,12 @@ export const useStore = create<StoreState>()(
         if (!loaded.ok) {
           return {
             ...state,
-            db: createSeedDatabase(),
+            // Nothing is invented in place of the file: an empty list with a
+            // visible warning is honest, demo projects would not be.
+            db: createEmptyDatabase(),
             selectedList: 'today',
-            storageError: 'Файл базы не удалось разобрать, открыты демонстрационные данные.',
+            storageError:
+              'Файл базы не удалось разобрать. Данные не загружены — прежний файл сохранён рядом, его можно загрузить через настройки.',
           } as unknown as Partial<StoreState>;
         }
         return { ...state, db: loaded.db, storageIssues: loaded.issues } as Partial<StoreState>;
@@ -1081,7 +1104,7 @@ export const useStore = create<StoreState>()(
             storageIssues: [...(state.storageIssues ?? []), ...alsoPending],
             storageError:
               pending ??
-              'Файл базы повреждён и не был загружен. Открыты демонстрационные данные; прежний файл сохранится рядом как database.json.bak, из него можно восстановить данные через настройки.',
+              'Файл базы повреждён и не был загружен. Список пока пуст; прежний файл сохранится рядом как database.json.bak, из него можно восстановить данные через настройки.',
           };
         }
         return {

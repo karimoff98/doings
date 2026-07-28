@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent, MouseEvent } from 'react';
 import { formatDayShort } from '../domain/dates';
+import { shortcutLabel } from '../domain/platform';
 import {
   SMART_LIST_META,
   listTitle,
@@ -25,18 +26,36 @@ import { TaskRow } from './TaskRow';
 import type { DropEdge } from './TaskRow';
 import { DeadlinePopover, WhenPopover } from './WhenPopover';
 
-const EMPTY_TEXT: Record<string, string> = {
-  inbox: 'Входящие пусты. Всё разобрано.',
-  today: 'На сегодня ничего не запланировано.',
-  upcoming: 'Впереди свободно.',
-  anytime: 'Нет задач, готовых к работе.',
-  someday: 'Здесь живут идеи на потом.',
-  logbook: 'Пока нечего вспомнить.',
-  trash: 'Корзина пуста.',
-  project: 'В проекте пока нет задач.',
-  area: 'В этой области пока пусто.',
-  tag: 'С этим тегом задач нет.',
-};
+/**
+ * One line per list. A clean installation must read as empty on purpose, not as
+ * broken, so the lists a newcomer sees first also say what to press.
+ */
+function emptyText(kind: string): string {
+  switch (kind) {
+    case 'inbox':
+      return `Входящие пусты — нажмите ${shortcutLabel('N')}, чтобы добавить задачу.`;
+    case 'today':
+      return 'На сегодня ничего не запланировано.';
+    case 'upcoming':
+      return 'Нет предстоящих задач.';
+    case 'anytime':
+      return 'Нет задач, готовых к работе.';
+    case 'someday':
+      return 'Здесь живут идеи на потом.';
+    case 'logbook':
+      return 'Пока нечего вспомнить.';
+    case 'trash':
+      return 'Корзина пуста.';
+    case 'project':
+      return 'В проекте пока нет задач.';
+    case 'area':
+      return 'В этой области пока пусто.';
+    case 'tag':
+      return 'С этим тегом задач нет.';
+    default:
+      return 'Пусто';
+  }
+}
 
 /** Which extra columns rows should show, per list. */
 function rowOptions(kind: string): { showWhen: boolean; showContainer: boolean } {
@@ -239,8 +258,14 @@ export function ListView() {
         )}
 
         {!hasRows && (
-          <p className="empty">
-            {activeFilter.length ? 'Нет задач с этими тегами.' : (EMPTY_TEXT[list.kind] ?? 'Пусто')}
+          <p className="empty" data-testid="empty-state">
+            {activeFilter.length ? 'Нет задач с этими тегами.' : emptyText(list.kind)}
+            {/* One optional action, only where pressing something is the point. */}
+            {!activeFilter.length && (list.kind === 'inbox' || list.kind === 'today') && (
+              <button type="button" className="empty__action" onClick={() => createTodo()}>
+                Новая задача
+              </button>
+            )}
           </p>
         )}
 

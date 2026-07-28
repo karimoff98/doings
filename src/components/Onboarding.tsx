@@ -1,14 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
+import { isMacPlatform, quickEntryLabel, shortcutLabel } from '../domain/platform';
 import { isFirstRun, markOnboardingComplete } from '../store/persistence';
 import { useStore } from '../store/store';
 import { Icon } from './Icon';
 import type { IconName } from './Icon';
-
-/** Modifier as written on this platform's keyboard. */
-function isMacPlatform(): boolean {
-  const platform = window.desktop?.platform ?? navigator.platform ?? '';
-  return platform.toLowerCase().includes('mac') || platform === 'darwin';
-}
 
 export interface Shortcut {
   label: string;
@@ -18,9 +13,9 @@ export interface Shortcut {
 /** Exported for tests: the keys differ between macOS and Windows. */
 export function shortcutsFor(mac: boolean): Shortcut[] {
   return [
-    { label: 'Новая задача', keys: mac ? '⌘N' : 'Ctrl+N' },
-    { label: 'Быстрый поиск', keys: mac ? '⌘F' : 'Ctrl+F' },
-    { label: 'Быстрый ввод из любого приложения', keys: mac ? '⌃⌥Space' : 'Ctrl+Alt+Space' },
+    { label: 'Новая задача', keys: shortcutLabel('N', mac) },
+    { label: 'Быстрый поиск', keys: shortcutLabel('F', mac) },
+    { label: 'Быстрый ввод из любого приложения', keys: quickEntryLabel(mac) },
   ];
 }
 
@@ -188,7 +183,7 @@ export function Onboarding() {
                 ))}
               </ul>
               <p className="onboard__note">
-                Полный список команд — в меню горячих клавиш ({mac ? '⌘/' : 'Ctrl+/'}), там же он
+                Полный список команд — в меню горячих клавиш ({shortcutLabel('/', mac)}), там же он
                 открывается кнопкой с клавиатурой в нижней части боковой панели.
               </p>
             </>

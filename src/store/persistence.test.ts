@@ -404,6 +404,51 @@ describe('первый запуск и онбординг', () => {
   });
 });
 
+describe('повреждённая база не выдаётся за успешную загрузку', () => {
+  it('возвращает null, предупреждает и не перезаписывает файл', async () => {
+    const save = vi.fn().mockResolvedValue({ ok: true, revision: 1 });
+    const quarantine = vi.fn().mockResolvedValue('/tmp/database.corrupt-2026.json');
+    mockDesktop({
+      load: vi.fn().mockResolvedValue('{ это не json'),
+      loadBackup: vi.fn().mockResolvedValue(null),
+      quarantine,
+      save,
+    });
+    const { appStorage, setStorageErrorHandler } = await loadModule();
+    setStorageErrorHandler((message) => errors.push(message));
+
+    const value = await appStorage.getItem('doings.v1');
+
+    // Nothing is invented in place of the file, and the user is told why.
+    expect(value).toBeNull();
+    expect(errors.join(' ')).toContain('не читается');
+    // The broken file is set aside rather than overwritten in place.
+    expect(quarantine).toHaveBeenCalled();
+    expect(save).not.toHaveBeenCalled();
+    // The message must not promise example data any more.
+    expect(errors.join(' ')).not.toContain('демонстрационными данными');
+  });
+
+  it('сначала пробует резервную копию', async () => {
+    const good = JSON.stringify({ state: { db: { todos: [] } }, version: 1 });
+    const quarantine = vi.fn().mockResolvedValue(null);
+    mockDesktop({
+      load: vi.fn().mockResolvedValue('{ битый'),
+      loadBackup: vi.fn().mockResolvedValue(good),
+      quarantine,
+    });
+    const { appStorage, setStorageErrorHandler } = await loadModule();
+    setStorageErrorHandler((message) => errors.push(message));
+
+    const value = await appStorage.getItem('doings.v1');
+
+    expect(value).toEqual({ state: { db: { todos: [] } }, version: 1 });
+    expect(errors.join(' ')).toContain('резервной копии');
+    // A usable backup means there is nothing to quarantine.
+    expect(quarantine).not.toHaveBeenCalled();
+  });
+});
+
 describe('сохранение перед выходом', () => {
   it('успевает записать текст, который ещё печатали в редакторе', async () => {
     const save = vi.fn().mockResolvedValue({ ok: true, revision: 1 });

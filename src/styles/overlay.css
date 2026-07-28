@@ -707,3 +707,15 @@
     animation: none;
   }
 }
+
+/* Secondary action: present, but visibly not the main path. */
+.settings__button--quiet {
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  color: var(--text-secondary);
+}
+
+.settings__button--quiet:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}

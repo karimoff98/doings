@@ -265,6 +265,49 @@ describe('онбординг', () => {
     expect(useStore.getState().editingTodoId).not.toBe(created);
   });
 
+  it('после завершения знакомства демонстрационных данных нет', () => {
+    // A brand-new profile: the store starts empty and must stay that way.
+    act(() => useStore.getState().resetToEmpty());
+    render();
+    click('Продолжить');
+    click('Продолжить');
+    click('Начать работу');
+
+    const db = useStore.getState().db;
+    expect(db.todos).toHaveLength(0);
+    expect(db.projects).toHaveLength(0);
+    expect(db.areas).toHaveLength(0);
+    expect(useStore.getState().selectedList).toBe('inbox');
+  });
+
+  it('«Создать первую задачу» создаёт ровно одну задачу с курсором в названии', () => {
+    act(() => useStore.getState().resetToEmpty());
+    render();
+    click('Продолжить');
+    click('Продолжить');
+    click('Создать первую задачу');
+
+    const { db, editingTodoId, freshTodoId, selectedList } = useStore.getState();
+    expect(db.todos).toHaveLength(1);
+    expect(selectedList).toBe('inbox');
+    // Open in the editor and marked fresh, which is what focuses the title.
+    expect(editingTodoId).toBe(db.todos[0].id);
+    expect(freshTodoId).toBe(db.todos[0].id);
+  });
+
+  it('оставленная пустой первая задача удаляется при закрытии', () => {
+    act(() => useStore.getState().resetToEmpty());
+    render();
+    click('Продолжить');
+    click('Продолжить');
+    click('Создать первую задачу');
+    expect(useStore.getState().db.todos).toHaveLength(1);
+
+    act(() => useStore.getState().closeEditor());
+    // Nothing was typed, so the row does not stay behind.
+    expect(useStore.getState().db.todos).toHaveLength(0);
+  });
+
   it('это модальное окно с доступным именем и фокусом внутри', () => {
     render();
     const dialog = container.querySelector('[role="dialog"]');
