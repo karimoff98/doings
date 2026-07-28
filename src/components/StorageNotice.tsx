@@ -19,30 +19,33 @@ export function StorageNotice() {
   const block = writeBlock();
   const choice = block?.canContinue ? block : null;
 
-  if (!error && !issues.length && !choice) return null;
+  if (!error && !issues.length && !block) return null;
 
   return (
     <div
-      className={`notice${error || choice ? ' notice--error' : ''}`}
-      role={error || choice ? 'alert' : 'status'}
+      className={`notice${error || block ? ' notice--error' : ''}`}
+      role={error || block ? 'alert' : 'status'}
       data-testid="storage-notice"
     >
       <span className="notice__icon">
-        <Icon name={error || choice ? 'flag' : 'notes'} size={14} />
+        <Icon name={error || block ? 'flag' : 'notes'} size={14} />
       </span>
       <div className="notice__body">
-        {(error || choice) && <div className="notice__title">{error ?? choice?.reason}</div>}
+        {(error || block) && <div className="notice__title">{error ?? block?.reason}</div>}
         {issues.map((issue) => (
           <div key={issue} className="notice__line">
             {issue}
           </div>
         ))}
+        {block && (
+          <div className="notice__line">
+            {choice
+              ? 'Новые изменения не сохраняются, пока вы не решите, что делать. Прежний файл базы остался нетронутым — его можно скопировать вручную и после этого продолжить.'
+              : 'Новые изменения не сохраняются: файл базы защищён от перезаписи. Сохраните копию данных через настройки и обновите приложение.'}
+          </div>
+        )}
         {choice && (
           <>
-            <div className="notice__line">
-              Новые изменения не сохраняются, пока вы не решите, что делать. Прежний файл базы
-              остался нетронутым — его можно скопировать вручную и после этого продолжить.
-            </div>
             {retryError && <div className="notice__line">{retryError}</div>}
             <div className="notice__actions">
               <button
@@ -71,8 +74,11 @@ export function StorageNotice() {
           </>
         )}
       </div>
-      {/* An active block has no close button: hiding it would hide data loss. */}
-      {!choice && (
+      {/*
+       * Any active block hides no close button: whether or not the user can lift
+       * it, the app is not saving, and that must stay on screen.
+       */}
+      {!block && (
         <button type="button" className="notice__close" aria-label="Скрыть" onClick={dismiss}>
           <Icon name="cross" size={12} />
         </button>

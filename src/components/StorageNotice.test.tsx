@@ -117,13 +117,27 @@ describe('баннер хранилища', () => {
     expect(container.querySelector('.notice__close')).toBeNull();
   });
 
-  it('постоянная блокировка не предлагает продолжить', () => {
+  it('постоянную блокировку тоже нельзя закрыть', () => {
     block.value = { reason: 'Файл сделан более новой версией', canContinue: false };
     useStore.setState({ storageError: 'Файл сделан более новой версией' });
     render();
 
+    expect(notice()).not.toBeNull();
+    // Lifting it is impossible, so there is nothing to offer...
     expect(button('Продолжить без резервной копии')).toBeUndefined();
-    // Nothing can be written anyway, but the message is dismissible.
-    expect(container.querySelector('.notice__close')).not.toBeNull();
+    // ...but hiding the warning would hide that nothing is being saved.
+    expect(container.querySelector('.notice__close')).toBeNull();
+    expect(container.textContent).toContain('Новые изменения не сохраняются');
+  });
+
+  it('постоянная блокировка видна и без сообщения в сторе', () => {
+    block.value = { reason: 'Файл сделан более новой версией', canContinue: false };
+    render();
+
+    expect(container.querySelector('.notice__title')?.textContent).toBe(
+      'Файл сделан более новой версией',
+    );
+    expect(container.querySelector('.notice__close')).toBeNull();
+    expect(container.textContent).toContain('Сохраните копию данных через настройки');
   });
 });
