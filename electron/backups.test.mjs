@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -344,15 +344,52 @@ describe('метаданные рядом с копией', () => {
 
   it('список не читает сами базы', async () => {
     const created = await backups.createBackup({ dir, payloadText: payload(5), reason: 'manual' });
-    // Ruining the payload while leaving the sidecar intact: if the list still
-    // reports the right numbers, it never opened the database.
-    await writeFile(path.join(dir, created.name), 'МУСОР, НЕ JSON', 'utf8');
+    const file = path.join(dir, created.name);
+    const size = (await stat(file)).size;
+    // Garbage of exactly the same size: the sidecar still describes this file, so
+    // if the list reports the right numbers it never opened the database.
+    await writeFile(file, 'x'.repeat(size), 'utf8');
 
     const { items } = await backups.listBackups(dir);
     expect(items).toHaveLength(1);
     expect(items[0].corrupt).toBe(false);
     expect(items[0].counts).toMatchObject({ todos: 5, projects: 1 });
     expect(items[0].reason).toBe('manual');
+  });
+
+  it('копия другого размера при целом метафайле считается повреждённой', async () => {
+    const created = await backups.createBackup({ dir, payloadText: payload(6), reason: 'manual' });
+    // Truncated by a failed disk write, say: the metadata no longer describes it.
+    await writeFile(path.join(dir, created.name), '{"kind":"doings-backup"', 'utf8');
+
+    const { items } = await backups.listBackups(dir);
+    expect(items[0]).toMatchObject({ name: created.name, corrupt: true });
+  });
+
+  it('размер в метафайле считается в байтах', async () => {
+    // Cyrillic titles take two bytes per letter: a character count would not
+    // match `stat` and would condemn a healthy copy.
+    const withCyrillic = JSON.stringify({
+      ...JSON.parse(payload(1)),
+      state: {
+        db: {
+          todos: [{ id: 'td_1', title: 'Задача с русским названием' }],
+          projects: [],
+          areas: [],
+          headings: [],
+          tags: [],
+        },
+      },
+    });
+    const created = await backups.createBackup({
+      dir,
+      payloadText: withCyrillic,
+      reason: 'manual',
+    });
+
+    const { items } = await backups.listBackups(dir);
+    expect(items[0].corrupt).toBe(false);
+    expect(items[0].size).toBe((await stat(path.join(dir, created.name))).size);
   });
 
   it('пропавший метафайл восстанавливается из копии', async () => {

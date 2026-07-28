@@ -180,8 +180,9 @@ async function createBackup({ dir, payloadText, reason, now = new Date() }) {
   if (!written.ok) return written;
 
   // The sidecar comes second: a copy without it is still restorable, and the
-  // list rebuilds the missing file on its own.
-  await writeMeta(dir, name, metaFrom(body, text.length));
+  // list rebuilds the missing file on its own. The size is counted in bytes, the
+  // same unit `stat` reports, so the two can be compared later.
+  await writeMeta(dir, name, metaFrom(body, Buffer.byteLength(text, 'utf8')));
 
   const pruned = await prune(dir);
   return { ok: true, name, createdAt: body.createdAt, reason, removed: pruned.removed };
@@ -264,6 +265,9 @@ async function readMeta(dir, name, stat) {
     if (meta?.kind !== 'doings-backup-meta' || typeof meta.createdAt !== 'string') {
       throw new Error('чужой формат');
     }
+    // The sidecar describes a file of a certain size. A different size means the
+    // copy changed underneath it, and the metadata can no longer be trusted.
+    if (meta.size !== stat.size) throw new Error('размер не совпадает');
     return {
       name,
       createdAt: meta.createdAt,
@@ -303,7 +307,7 @@ async function rebuildMeta(dir, name, stat) {
           ? body.payloadHash
           : hashPayload(JSON.stringify(body.payload)),
     },
-    text.length,
+    Buffer.byteLength(text, 'utf8'),
   );
   // Written back, so the next list is cheap again.
   await writeMeta(dir, name, meta);

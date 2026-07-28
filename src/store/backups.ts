@@ -66,7 +66,9 @@ export async function createBackup(
     const result = await bridge.create(reason);
     return { ok: Boolean(result?.ok), reason: result?.reason };
   } catch (error) {
-    return { ok: false, reason: String(error) };
+    // The raw IPC text belongs in the log, not in a message to the user.
+    console.error('Не удалось создать резервную копию:', error);
+    return { ok: false, reason: 'io' };
   }
 }
 

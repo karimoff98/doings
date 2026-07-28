@@ -363,7 +363,7 @@ describe('задержка записи до важной работы', () => {
 
   it('файл более новой версии остаётся заблокированным навсегда', async () => {
     mockDesktop({ save: vi.fn().mockResolvedValue(true) });
-    const { blockWrites, allowWrites, writeBlock } = await loadModule();
+    const { blockWrites, allowWrites, writeBlock, retryBlockedWrite } = await loadModule();
 
     blockWrites('Файл сделан более новой версией приложения');
     expect(writeBlock()?.canContinue).toBe(false);
@@ -371,6 +371,89 @@ describe('задержка записи до важной работы', () => {
     allowWrites();
     // Overwriting a newer file would destroy fields this version cannot read.
     expect(writeBlock()?.reason).toContain('более новой версией');
+
+    // Even the retry path refuses to lift a permanent block.
+    expect((await retryBlockedWrite()).ok).toBe(false);
+    expect(writeBlock()?.canContinue).toBe(false);
+  });
+
+  it('снятая раньше блокировка не превращается в разрешаемую', async () => {
+    mockDesktop({ save: vi.fn().mockResolvedValue(true) });
+    const { blockWritesPendingChoice, blockWrites, writeBlock } = await loadModule();
+
+    blockWritesPendingChoice('Копия не создана');
+    expect(writeBlock()?.canContinue).toBe(true);
+
+    blockWrites('Файл сделан более новой версией приложения');
+    expect(writeBlock()?.canContinue).toBe(false);
+  });
+});
+
+describe('повтор отклонённой записи', () => {
+  it('после согласия пользователя снимок всё-таки записывается', async () => {
+    const save = vi.fn().mockResolvedValue({ ok: true, revision: 2 });
+    mockDesktop({ save });
+    const { appStorage, blockWritesPendingChoice, retryBlockedWrite, writeBlock } =
+      await loadModule();
+
+    blockWritesPendingChoice('Копия перед обновлением схемы не создана');
+    appStorage.setItem('doings.v1', { state: { db: 'важное' }, version: 1 } as never);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(save).not.toHaveBeenCalled();
+
+    const result = await retryBlockedWrite();
+
+    // The very snapshot the block turned away reaches the disk.
+    expect(result).toEqual({ ok: true });
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(String(save.mock.calls[0][0])).toContain('важное');
+    expect(writeBlock()).toBeNull();
+  });
+
+  it('ошибка повторной записи сохраняет и блокировку, и снимок', async () => {
+    const save = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, reason: 'io' })
+      .mockResolvedValue({ ok: true, revision: 3 });
+    mockDesktop({ save });
+    const { appStorage, blockWritesPendingChoice, retryBlockedWrite, writeBlock } =
+      await loadModule();
+
+    blockWritesPendingChoice('Копия перед обновлением схемы не создана');
+    appStorage.setItem('doings.v1', { state: { db: 'важное' }, version: 1 } as never);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    const failed = await retryBlockedWrite();
+    expect(failed.ok).toBe(false);
+    expect(failed.error).toContain('Не удалось сохранить');
+    // Still blocked, and the snapshot is still in hand for another attempt.
+    expect(writeBlock()?.canContinue).toBe(true);
+
+    const second = await retryBlockedWrite();
+    expect(second).toEqual({ ok: true });
+    expect(String(save.mock.calls[1][0])).toContain('важное');
+    expect(writeBlock()).toBeNull();
+  });
+
+  it('без отклонённого снимка просто дописывает очередь', async () => {
+    const save = vi.fn().mockResolvedValue({ ok: true, revision: 1 });
+    mockDesktop({ save });
+    const { blockWritesPendingChoice, retryBlockedWrite, writeBlock } = await loadModule();
+
+    blockWritesPendingChoice('Копия не создана');
+    // Nothing was withheld: lifting the block is all that is needed.
+    expect((await retryBlockedWrite()).ok).toBe(true);
+    expect(writeBlock()).toBeNull();
+  });
+
+  it('вне блокировки повтор ничего не пишет', async () => {
+    const save = vi.fn().mockResolvedValue({ ok: true, revision: 1 });
+    mockDesktop({ save });
+    const { retryBlockedWrite } = await loadModule();
+
+    const result = await retryBlockedWrite();
+    expect(result.ok).toBe(false);
+    expect(save).not.toHaveBeenCalled();
   });
 
   it('сорвавшаяся работа не блокирует запись навсегда', async () => {

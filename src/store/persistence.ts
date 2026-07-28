@@ -70,6 +70,8 @@ let writesBlocked: string | null = null;
  */
 export function blockWrites(reason: string): void {
   writesBlocked = reason;
+  // A permanent block must never turn into one the user can wave away.
+  blockIsChoice = false;
 }
 
 /**
@@ -79,9 +81,44 @@ export function blockWrites(reason: string): void {
  */
 let blockIsChoice = false;
 
+/**
+ * The snapshot a block turned away. Without it there would be nothing left to
+ * save once the user agrees to go on: the debounce had already handed it over.
+ */
+let blockedWrite: string | null = null;
+
+/** Set by whichever storage is active, so a withheld snapshot can be re-queued. */
+let performWrite: ((json: string) => Promise<void>) | null = null;
+
 export function blockWritesPendingChoice(reason: string): void {
   writesBlocked = reason;
   blockIsChoice = true;
+}
+
+/**
+ * Writes the snapshot a block turned away, after the user chose to continue
+ * without a backup. On failure the block and the snapshot stay, so they can try
+ * again instead of losing the change.
+ */
+export async function retryBlockedWrite(): Promise<FlushResult> {
+  const block = writeBlock();
+  if (!block?.canContinue) {
+    return { ok: false, error: block?.reason ?? 'Запись не заблокирована' };
+  }
+
+  const json = blockedWrite;
+  allowWrites();
+
+  // Nothing was withheld (or there is no file storage): a normal flush is enough.
+  if (!json || !performWrite) return flushPendingWrites();
+
+  await performWrite(json);
+  if (lastWriteFailure) {
+    blockWritesPendingChoice(block.reason);
+    return { ok: false, error: lastWriteFailure };
+  }
+  blockedWrite = null;
+  return { ok: true };
 }
 
 /** Whether writing is currently refused, and whether the user may allow it. */
@@ -269,6 +306,8 @@ function fileStorage(): StateStorage | null {
       await writeGate;
 
       if (writesBlocked) {
+        // Held back rather than dropped: the user may still choose to save it.
+        blockedWrite = json;
         fail(writesBlocked);
         return;
       }
@@ -317,6 +356,9 @@ function fileStorage(): StateStorage | null {
   };
 
   /** The window going away is the same deadline as quitting: text first, then disk. */
+  // Lets `retryBlockedWrite` put a withheld snapshot back into this queue.
+  performWrite = write;
+
   const flushEverything = () => {
     commitPendingEdits();
     void flush();
