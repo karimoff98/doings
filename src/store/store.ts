@@ -518,8 +518,9 @@ export const useStore = create<StoreState>()(
 
         completeTodo: (ids) =>
           mutateEach(ids, (todo, db) => {
-            // A todo in the trash cannot be worked on.
-            if (todo.trashed) return;
+            // Trashed items cannot be worked on, and completing an already
+            // completed todo would spawn a second copy of a repeating one.
+            if (todo.trashed || todo.status !== 'open') return;
             todo.status = 'completed';
             todo.completedAt = new Date().toISOString();
             const spawned = nextRepeatCopy(todo, newId);
@@ -558,6 +559,7 @@ export const useStore = create<StoreState>()(
         restoreTodo: (ids) =>
           mutateEach(ids, (todo) => {
             todo.trashed = false;
+            todo.trashedBy = undefined;
           }),
 
         emptyTrash: () =>
@@ -713,18 +715,29 @@ export const useStore = create<StoreState>()(
             // disappear from every list while still being open. Reopening the
             // project only reopens the todos that were closed together with it,
             // recognised by the shared timestamp.
+            const spawned: Todo[] = [];
             for (const todo of db.todos) {
               if (todo.projectId !== id || todo.trashed) continue;
               if (completing) {
-                if (todo.status === 'open') {
-                  todo.status = 'completed';
-                  todo.completedAt = stamp;
+                if (todo.status !== 'open') continue;
+                todo.status = 'completed';
+                todo.completedAt = stamp;
+                // A repeating routine outlives the project it lived in: its next
+                // copy goes to the Inbox, otherwise the series would either break
+                // or hide inside a project nobody looks at any more.
+                const next = nextRepeatCopy(todo, newId);
+                if (next) {
+                  next.projectId = undefined;
+                  next.headingId = undefined;
+                  next.areaId = undefined;
+                  spawned.push(next);
                 }
               } else if (previousStamp && todo.completedAt === previousStamp) {
                 todo.status = 'open';
                 todo.completedAt = undefined;
               }
             }
+            db.todos.push(...spawned);
           }),
 
         trashProject: (id) =>
@@ -732,7 +745,11 @@ export const useStore = create<StoreState>()(
             const project = db.projects.find((p) => p.id === id);
             if (project) project.trashed = true;
             for (const todo of db.todos) {
-              if (todo.projectId === id) todo.trashed = true;
+              if (todo.projectId !== id || todo.trashed) continue;
+              todo.trashed = true;
+              // Remember who did it, so restoring the project does not also
+              // resurrect todos the user had thrown away earlier.
+              todo.trashedBy = id;
             }
           }),
 
@@ -741,7 +758,9 @@ export const useStore = create<StoreState>()(
             const project = db.projects.find((p) => p.id === id);
             if (project) project.trashed = false;
             for (const todo of db.todos) {
-              if (todo.projectId === id) todo.trashed = false;
+              if (todo.projectId !== id || todo.trashedBy !== id) continue;
+              todo.trashed = false;
+              todo.trashedBy = undefined;
             }
           }),
 
@@ -931,7 +950,7 @@ export const useStore = create<StoreState>()(
         const state = (persisted ?? {}) as Partial<StoreState> & { storageIssues?: string[] };
         // Problems found while reading are collected here, because a message
         // pushed into the state earlier would be lost when hydration replaces it.
-        const pending = drainStorageErrors()[0];
+        const [pending, ...alsoPending] = drainStorageErrors();
         // No database in the snapshot: either a first run, or `migrate` refused
         // to open the file and only passed the message through.
         if (!state.db) {
@@ -939,6 +958,7 @@ export const useStore = create<StoreState>()(
             ...current,
             ...state,
             storageError: state.storageError ?? pending ?? current.storageError,
+            storageIssues: [...(state.storageIssues ?? []), ...alsoPending],
           };
         }
         // Only validation here: version steps already ran in `migrate` above.
@@ -951,6 +971,7 @@ export const useStore = create<StoreState>()(
             // The previous file becomes database.json.bak on the next successful
             // save, so it can still be recovered by hand.
             selectedList: 'today',
+            storageIssues: [...(state.storageIssues ?? []), ...alsoPending],
             storageError:
               pending ??
               'Файл базы повреждён и не был загружен. Открыты демонстрационные данные; прежний файл сохранится рядом как database.json.bak, из него можно восстановить данные через настройки.',
@@ -963,7 +984,9 @@ export const useStore = create<StoreState>()(
           // A stored list may point at a project that the file no longer has.
           selectedList: validList(loaded.db, state.selectedList ?? current.selectedList),
           storageError: state.storageError ?? pending ?? current.storageError,
-          storageIssues: [...(state.storageIssues ?? []), ...loaded.issues],
+          // Nothing found during loading is dropped: only the first message goes
+          // to the banner title, the rest are listed under it.
+          storageIssues: [...(state.storageIssues ?? []), ...alsoPending, ...loaded.issues],
         };
       },
       /**

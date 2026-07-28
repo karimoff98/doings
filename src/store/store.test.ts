@@ -333,3 +333,64 @@ describe('выделение после действий', () => {
     expect(store().selection).toEqual([todo.id]);
   });
 });
+
+describe('повторное выполнение', () => {
+  it('второй вызов completeTodo не создаёт вторую копию повтора', () => {
+    const todo = byTitle('Позвонить в сервис');
+    store().setWhen(todo.id, { kind: 'today' });
+    store().setRepeat(todo.id, { unit: 'day', every: 1 });
+
+    store().completeTodo(todo.id);
+    store().completeTodo(todo.id);
+
+    const series = store().db.todos.filter((item) => item.repeat);
+    expect(series).toHaveLength(2);
+    expect(series.filter((item) => item.status === 'open')).toHaveLength(1);
+  });
+
+  it('выполнение задачи из корзины ничего не меняет', () => {
+    const todo = byTitle('Позвонить в сервис');
+    store().trashTodo(todo.id);
+    store().completeTodo(todo.id);
+
+    expect(byTitle('Позвонить в сервис').status).toBe('open');
+  });
+});
+
+describe('завершение проекта с повторяющейся задачей', () => {
+  it('серия продолжается во Входящих, а не внутри закрытого проекта', () => {
+    const project = store().db.projects.find((p) => p.title === 'Запуск приложения')!;
+    const todo = store().db.todos.find((t) => t.projectId === project.id)!;
+    store().setWhen(todo.id, { kind: 'today' });
+    store().setRepeat(todo.id, { unit: 'day', every: 1 });
+
+    store().completeProject(project.id);
+
+    const copy = store().db.todos.find(
+      (item) => item.seriesId === todo.id && item.status === 'open',
+    );
+    expect(copy).toBeDefined();
+    // Внутри завершённого проекта копия была бы не видна ни в одном списке.
+    expect(copy?.projectId).toBeUndefined();
+    expect(copy?.headingId).toBeUndefined();
+    const inbox = selectSections(store().db, 'inbox').flatMap((section) =>
+      section.rows.flatMap((row) => (row.kind === 'todo' ? [row.todo.id] : [])),
+    );
+    expect(inbox).toContain(copy!.id);
+  });
+});
+
+describe('восстановление проекта', () => {
+  it('возвращает только задачи, удалённые вместе с ним', () => {
+    const project = store().db.projects.find((p) => p.title === 'Запуск приложения')!;
+    const удалённаяРаньше = store().db.todos.find((t) => t.projectId === project.id)!;
+
+    store().trashTodo(удалённаяРаньше.id);
+    store().trashProject(project.id);
+    store().restoreProject(project.id);
+
+    const after = store().db.todos.filter((t) => t.projectId === project.id);
+    expect(after.find((t) => t.id === удалённаяРаньше.id)?.trashed).toBe(true);
+    expect(after.filter((t) => t.id !== удалённаяРаньше.id).every((t) => !t.trashed)).toBe(true);
+  });
+});

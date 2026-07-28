@@ -20,6 +20,14 @@ contextBridge.exposeInMainWorld('desktop', {
   closeQuickEntry() {
     ipcRenderer.send('quick:close');
   },
+  /** Tells the main process that the command listener is mounted. */
+  notifyReady() {
+    ipcRenderer.send('renderer:ready');
+  },
+  /** Brings the app window forward, used when a reminder fires. */
+  focusWindow() {
+    ipcRenderer.send('window:focus');
+  },
   storage: {
     /** Whole database as JSON, or null on the very first run. */
     load() {

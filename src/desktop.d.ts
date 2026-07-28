@@ -5,6 +5,10 @@ interface DesktopBridge {
   /** Only available inside the Quick Entry window. */
   submitQuickEntry?: (title: string) => void;
   closeQuickEntry?: () => void;
+  /** Reports that the renderer is listening for menu commands. */
+  notifyReady?: () => void;
+  /** Brings the app window forward, used when a reminder fires. */
+  focusWindow?: () => void;
   storage?: {
     load: () => Promise<string | null>;
     save: (json: string) => Promise<boolean>;

@@ -57,6 +57,11 @@ export interface Todo {
   repeat?: RepeatRule;
   /** Ties every copy of a repeating todo to the original. */
   seriesId?: Id;
+  /**
+   * Id of the project whose deletion sent this todo to the trash. Restoring the
+   * project only brings back its own casualties, not todos deleted separately.
+   */
+  trashedBy?: Id;
   tagIds: Id[];
   status: ItemStatus;
   completedAt?: string;

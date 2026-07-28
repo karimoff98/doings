@@ -48,6 +48,12 @@ function useHydrated(): boolean {
     };
   }, [hydrated]);
 
+  // The desktop shell holds back commands until this point: a todo created
+  // before the saved data arrives would be wiped by hydration.
+  useEffect(() => {
+    if (hydrated || failed) window.desktop?.notifyReady?.();
+  }, [hydrated, failed]);
+
   return hydrated || failed;
 }
 

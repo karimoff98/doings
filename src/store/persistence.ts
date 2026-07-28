@@ -45,6 +45,14 @@ export function drainStorageErrors(): string[] {
 }
 
 /**
+ * Called after a successful save: the same problem happening again later
+ * deserves a fresh warning, so suppression must not last the whole session.
+ */
+function forgetReportedErrors(): void {
+  alreadyReported.clear();
+}
+
+/**
  * The store registers a handler here after it is created. A failed write has to
  * reach the user, otherwise the app silently stops saving.
  */
@@ -104,20 +112,26 @@ function fileStorage(): StateStorage | null {
 
   let pending: string | null = null;
   let timer: number | undefined;
+  /** Writes run one after another: two saves racing on one temp file lose data. */
+  let queue: Promise<void> = Promise.resolve();
 
-  const write = async (json: string) => {
-    if (writesBlocked) {
-      report(writesBlocked);
-      return;
-    }
-    try {
-      const ok = await api.save(json);
-      if (!ok) {
-        report('Не удалось сохранить базу на диск. Проверьте свободное место и права доступа.');
+  const write = (json: string): Promise<void> => {
+    queue = queue.then(async () => {
+      if (writesBlocked) {
+        report(writesBlocked);
+        return;
       }
-    } catch (error) {
-      report(`Не удалось сохранить базу: ${String(error)}`);
-    }
+      try {
+        const ok = await api.save(json);
+        if (ok) forgetReportedErrors();
+        else {
+          report('Не удалось сохранить базу на диск. Проверьте свободное место и права доступа.');
+        }
+      } catch (error) {
+        report(`Не удалось сохранить базу: ${String(error)}`);
+      }
+    });
+    return queue;
   };
 
   const flush = () => {
@@ -245,6 +259,7 @@ function browserStorage(): StateStorage {
       try {
         globalThis.localStorage.setItem(name, value);
         dropLegacy();
+        forgetReportedErrors();
       } catch (error) {
         // Usually the quota: tell the user instead of losing changes quietly.
         report(`Не удалось сохранить данные в браузере: ${String(error)}`);

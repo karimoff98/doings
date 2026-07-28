@@ -200,6 +200,7 @@ export function validateDatabase(raw: unknown): ValidationResult | null {
     reminder: clockTime(row.reminder),
     repeat: repeat(row.repeat),
     seriesId: optionalId(row.seriesId),
+    trashedBy: optionalId(row.trashedBy),
     tagIds: tagIds(row.tagIds),
     status: status(row.status),
     completedAt: optionalId(row.completedAt),

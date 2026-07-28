@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { today } from '../domain/dates';
-import type { Todo } from '../domain/types';
+import { selectSections } from '../domain/lists';
+import type { Database, ListKey, Todo } from '../domain/types';
 import { useStore } from '../store/store';
 
 const FIRED_KEY = 'doings.reminders-fired';
@@ -34,6 +35,20 @@ function currentTime(): string {
   const now = new Date();
   const pad = (value: number) => String(value).padStart(2, '0');
   return `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+}
+
+/** A list where the todo is actually visible, for jumping to it from a notification. */
+function listContaining(db: Database, todoId: string): ListKey {
+  for (const key of ['today', 'anytime', 'inbox', 'upcoming', 'someday'] as const) {
+    const visible = selectSections(db, key).some((section) =>
+      section.rows.some((row) => row.kind === 'todo' && row.todo.id === todoId),
+    );
+    if (visible) return key;
+  }
+  const todo = db.todos.find((item) => item.id === todoId);
+  if (todo?.projectId) return `project:${todo.projectId}`;
+  if (todo?.areaId) return `area:${todo.areaId}`;
+  return 'today';
 }
 
 /** The day a reminder belongs to, or undefined when it cannot fire. */
@@ -82,7 +97,12 @@ export function useReminders() {
           tag: key,
         });
         notification.onclick = () => {
-          useStore.getState().selectTodo(todo.id);
+          // Selecting a todo the current list does not show would do nothing
+          // visible, so switch to a list where it is guaranteed to be.
+          const store = useStore.getState();
+          store.selectList(listContaining(store.db, todo.id));
+          store.openEditor(todo.id);
+          window.desktop?.focusWindow?.();
           window.focus();
         };
       }

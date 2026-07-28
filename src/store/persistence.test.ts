@@ -132,6 +132,62 @@ describe('файловое хранилище', () => {
     await vi.waitFor(() => expect(errors.join(' ')).toContain('Не удалось сохранить'));
   });
 
+  it('сохранения идут строго по очереди', async () => {
+    // Медленный диск: два сохранения внахлёст боролись бы за один временный файл.
+    const порядок: string[] = [];
+    let активных = 0;
+    let максимумОдновременно = 0;
+    const save = vi.fn().mockImplementation(async (json: string) => {
+      активных += 1;
+      максимумОдновременно = Math.max(максимумОдновременно, активных);
+      порядок.push(`начало ${json.length}`);
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      порядок.push(`конец ${json.length}`);
+      активных -= 1;
+      return true;
+    });
+    mockDesktop({ save });
+    const { appStorage } = await loadModule();
+
+    appStorage.setItem('doings.v1', { state: { a: 1 }, version: 1 } as never);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    appStorage.setItem('doings.v1', { state: { a: 22 }, version: 1 } as never);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    appStorage.setItem('doings.v1', { state: { a: 333 }, version: 1 } as never);
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(3), { timeout: 3000 });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(максимумОдновременно).toBe(1);
+    // Ни одно «начало» не оказывается между «начало» и «конец» другого.
+    expect(порядок.filter((_, i) => i % 2 === 0).every((line) => line.startsWith('начало'))).toBe(
+      true,
+    );
+    // Последним на диск уходит последний снимок.
+    const последний = save.mock.calls.at(-1)?.[0] as string;
+    expect(порядок.at(-1)).toBe(`конец ${последний.length}`);
+  });
+
+  it('после удачного сохранения та же ошибка снова показывается', async () => {
+    let удача = false;
+    const save = vi.fn().mockImplementation(async () => udacha());
+    const udacha = () => удача;
+    mockDesktop({ save });
+    const { appStorage, setStorageErrorHandler } = await loadModule();
+    setStorageErrorHandler((message) => errors.push(message));
+
+    appStorage.setItem('doings.v1', { state: { a: 1 }, version: 1 } as never);
+    await vi.waitFor(() => expect(errors).toHaveLength(1), { timeout: 3000 });
+
+    удача = true;
+    appStorage.setItem('doings.v1', { state: { a: 2 }, version: 1 } as never);
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(2), { timeout: 3000 });
+
+    удача = false;
+    appStorage.setItem('doings.v1', { state: { a: 3 }, version: 1 } as never);
+    // Подавление на весь сеанс скрывало бы повторную поломку навсегда.
+    await vi.waitFor(() => expect(errors).toHaveLength(2), { timeout: 3000 });
+  });
+
   it('заблокированная запись не трогает файл', async () => {
     const save = vi.fn().mockResolvedValue(true);
     mockDesktop({ save });

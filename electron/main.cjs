@@ -16,6 +16,43 @@ function send(command) {
   target?.webContents.send('menu:command', command);
 }
 
+/** Set by the renderer once its command listener is mounted. */
+let rendererReady = false;
+let waitingForRenderer = [];
+
+ipcMain.on('renderer:ready', (event) => {
+  if (mainWindow && event.sender === mainWindow.webContents) {
+    rendererReady = true;
+    for (const resolve of waitingForRenderer.splice(0)) resolve();
+  }
+});
+
+function whenRendererReady() {
+  if (rendererReady) return Promise.resolve();
+  return new Promise((resolve) => {
+    waitingForRenderer.push(resolve);
+    // Never hang forever: after this the renderer is almost certainly listening.
+    setTimeout(resolve, 8000);
+  });
+}
+
+/**
+ * Delivers a command to the main window, creating and showing it first when the
+ * user has closed it. Waits for the renderer, otherwise the message arrives
+ * before anything is listening and the todo silently disappears.
+ */
+async function deliverToMainWindow(command, payload) {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    rendererReady = false;
+    createWindow();
+  }
+  if (!mainWindow) return;
+  mainWindow.show();
+  mainWindow.focus();
+  await whenRendererReady();
+  mainWindow.webContents.send('menu:command', command, payload);
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1160,
@@ -56,6 +93,8 @@ function createWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
+    rendererReady = false;
+    waitingForRenderer = [];
     // The hidden Quick Entry window must not keep the app alive on Windows.
     if (!isMac) app.quit();
   });
@@ -165,26 +204,39 @@ ipcMain.handle('storage:load', async () => {
   }
 });
 
-ipcMain.handle('storage:save', async (_event, json) => {
+/**
+ * Saves never overlap: two writes sharing one temp file could rename it in the
+ * wrong order and put an older snapshot on disk.
+ */
+let saveQueue = Promise.resolve();
+
+ipcMain.handle('storage:save', (_event, json) => {
   if (typeof json !== 'string') return false;
+  const result = saveQueue.then(() => writeDatabase(json));
+  // A rejected write must not poison the queue for the next save.
+  saveQueue = result.catch(() => {});
+  return result;
+});
+
+async function writeDatabase(json) {
   const file = databasePath();
   if (!json) {
     await fs.rm(file, { force: true });
     return true;
   }
+  // A unique temp name per write, so nothing can clash even across windows.
+  const temp = `${file}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   try {
-    // Write beside the target and rename: a crash mid-write cannot corrupt the
-    // database, and the previous version stays available as .bak.
-    const temp = `${file}.tmp`;
     await fs.writeFile(temp, json, 'utf8');
     await fs.copyFile(file, `${file}.bak`).catch(() => {});
     await fs.rename(temp, file);
     return true;
   } catch (error) {
     console.error('Не удалось сохранить базу:', error);
+    await fs.rm(temp, { force: true }).catch(() => {});
     return false;
   }
-});
+}
 
 ipcMain.handle('storage:path', () => databasePath());
 
@@ -237,14 +289,24 @@ ipcMain.handle('storage:import', async () => {
   return fs.readFile(file, 'utf8');
 });
 
-ipcMain.on('quick:submit', (_event, title) => {
+ipcMain.on('quick:submit', async (_event, title) => {
   if (typeof title !== 'string' || !title.trim()) return;
-  const target = mainWindow;
-  target?.webContents.send('menu:command', 'quick-add', title.trim());
   quickWindow?.hide();
+  // On macOS the app keeps running with no windows, so the main window may have
+  // to be recreated before it can accept the todo.
+  await deliverToMainWindow('quick-add', title.trim());
 });
 
 ipcMain.on('quick:close', () => quickWindow?.hide());
+
+ipcMain.on('window:focus', async () => {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    rendererReady = false;
+    createWindow();
+  }
+  mainWindow?.show();
+  mainWindow?.focus();
+});
 
 function buildMenu() {
   const command = (label, accelerator, id) => ({
