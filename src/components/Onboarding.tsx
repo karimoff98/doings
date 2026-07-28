@@ -39,7 +39,7 @@ const PLACES: { icon: IconName; title: string; text: string; accent: string }[] 
   },
   {
     icon: 'calendar',
-    title: 'Планы',
+    title: 'Предстоящие',
     text: 'Задачи с датами: видно, что и когда предстоит сделать.',
     accent: 'var(--c-upcoming)',
   },
@@ -64,7 +64,14 @@ export function Onboarding() {
   const card = useRef<HTMLDivElement>(null);
   const selectList = useStore((s) => s.selectList);
   const createTodo = useStore((s) => s.createTodo);
+  const setOnboarding = useStore((s) => s.setOnboarding);
   const mac = isMacPlatform();
+
+  // Tells the keyboard and menu layers to stand down while this is up.
+  useEffect(() => {
+    setOnboarding(open);
+    return () => setOnboarding(false);
+  }, [open, setOnboarding]);
 
   // Focus starts inside the dialog and stays there: nothing behind it is usable
   // while the introduction is open.

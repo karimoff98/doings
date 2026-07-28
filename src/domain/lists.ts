@@ -23,7 +23,7 @@ export interface ListMeta {
 export const SMART_LIST_META: Record<SmartList, Omit<ListMeta, 'key'>> = {
   inbox: { title: 'Входящие', icon: 'inbox', accent: 'var(--c-inbox)' },
   today: { title: 'Сегодня', icon: 'star', accent: 'var(--c-today)' },
-  upcoming: { title: 'Планы', icon: 'calendar', accent: 'var(--c-upcoming)' },
+  upcoming: { title: 'Предстоящие', icon: 'calendar', accent: 'var(--c-upcoming)' },
   anytime: { title: 'В любое время', icon: 'layers', accent: 'var(--c-anytime)' },
   someday: { title: 'Когда-нибудь', icon: 'box', accent: 'var(--c-someday)' },
   logbook: { title: 'Журнал', icon: 'book', accent: 'var(--c-logbook)' },

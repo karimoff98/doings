@@ -30,6 +30,11 @@ export function useDesktopMenu() {
       const anchor = store.selectedTodoId;
       const selection = store.selection;
 
+      // Same rule as for the keyboard: while the introduction is up, menu items
+      // must not change anything behind it. Quitting, reloading and the other
+      // system roles are handled by Electron itself and never arrive here.
+      if (store.onboardingOpen) return;
+
       if (command.startsWith('list:')) {
         const key = command.slice(5) as SmartList;
         if (SMART_LISTS.includes(key)) store.selectList(key);

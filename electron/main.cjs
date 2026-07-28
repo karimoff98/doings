@@ -471,7 +471,7 @@ function buildMenu() {
       submenu: [
         command('Входящие', 'CmdOrCtrl+1', 'list:inbox'),
         command('Сегодня', 'CmdOrCtrl+2', 'list:today'),
-        command('Планы', 'CmdOrCtrl+3', 'list:upcoming'),
+        command('Предстоящие', 'CmdOrCtrl+3', 'list:upcoming'),
         command('В любое время', 'CmdOrCtrl+4', 'list:anytime'),
         command('Когда-нибудь', 'CmdOrCtrl+5', 'list:someday'),
         command('Журнал', 'CmdOrCtrl+6', 'list:logbook'),

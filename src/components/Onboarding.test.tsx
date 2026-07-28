@@ -4,6 +4,8 @@ import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Onboarding, shortcutsFor } from './Onboarding';
+import { useDesktopMenu } from '../hooks/useDesktopMenu';
+import { useKeyboard } from '../hooks/useKeyboard';
 import { useStore } from '../store/store';
 
 /**
@@ -24,11 +26,34 @@ vi.mock('../store/persistence', async (importOriginal) => {
 let container: HTMLDivElement;
 let root: Root;
 
+/** Native menu commands are delivered through the preload bridge. */
+let menuHandler: ((command: string, payload?: string) => void) | null = null;
+
+function sendMenuCommand(command: string): void {
+  if (!menuHandler) throw new Error('меню не подписано');
+  menuHandler(command);
+}
+
+/** ⌘N as the global keyboard layer sees it: the listener sits on the window. */
+function pressNewTodo(): void {
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', metaKey: true }));
+}
+
+/**
+ * The introduction alone proves nothing: the keyboard and menu layers live in
+ * the app around it, so the harness mounts them together.
+ */
+function Harness() {
+  useKeyboard();
+  useDesktopMenu();
+  return <Onboarding />;
+}
+
 function render(): void {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
-  act(() => root.render(<Onboarding />));
+  act(() => root.render(<Harness />));
 }
 
 function unmount(): void {
@@ -70,14 +95,33 @@ function fakeLocalStorage(): void {
 }
 
 function setPlatform(platform: string): void {
-  (window as unknown as { desktop: unknown }).desktop = { platform };
+  (window as unknown as { desktop: unknown }).desktop = {
+    platform,
+    onCommand(callback: (command: string, payload?: string) => void) {
+      menuHandler = callback;
+      return () => {
+        menuHandler = null;
+      };
+    },
+  };
 }
+
+// Tells React that `act` is legitimate here.
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 beforeEach(() => {
   visible.firstRun = true;
   fakeLocalStorage();
   setPlatform('darwin');
-  useStore.setState({ selectedList: 'today' });
+  // A leftover open editor or selection would blur the signals below.
+  useStore.setState({
+    selectedList: 'today',
+    editingTodoId: undefined,
+    freshTodoId: undefined,
+    selection: [],
+    selectedTodoId: undefined,
+    onboardingOpen: false,
+  });
 });
 
 afterEach(() => {
@@ -174,6 +218,51 @@ describe('онбординг', () => {
     click('Продолжить');
     click('Создать первую задачу');
     expect(useStore.getState().db.todos).toHaveLength(before + 1);
+  });
+
+  it('пока знакомство открыто, ⌘N не создаёт задачу', () => {
+    render();
+    const before = useStore.getState().db.todos.length;
+    expect(useStore.getState().onboardingOpen).toBe(true);
+
+    act(() => pressNewTodo());
+
+    // Creating a todo opens it in the editor, so an untouched editor is the
+    // reliable sign that nothing happened behind the introduction.
+    expect(useStore.getState().editingTodoId).toBeUndefined();
+    expect(useStore.getState().db.todos).toHaveLength(before);
+  });
+
+  it('пока знакомство открыто, команда меню new-todo не создаёт задачу', () => {
+    render();
+    const before = useStore.getState().db.todos.length;
+
+    act(() => sendMenuCommand('new-todo'));
+
+    expect(useStore.getState().editingTodoId).toBeUndefined();
+    expect(useStore.getState().db.todos).toHaveLength(before);
+  });
+
+  it('после «Начать работу» те же команды снова работают', () => {
+    render();
+    click('Продолжить');
+    click('Продолжить');
+    click('Начать работу');
+    expect(useStore.getState().onboardingOpen).toBe(false);
+    const before = useStore.getState().db.todos.length;
+
+    act(() => pressNewTodo());
+    const created = useStore.getState().editingTodoId;
+    expect(created).toBeDefined();
+    expect(useStore.getState().db.todos).toHaveLength(before + 1);
+
+    // Giving it a title keeps it: a still-blank todo is dropped when the next
+    // one is created, which would mask the menu command.
+    act(() => useStore.getState().commitTodoText(created!, { title: 'Есть текст' }));
+    act(() => sendMenuCommand('new-todo'));
+
+    expect(useStore.getState().db.todos).toHaveLength(before + 2);
+    expect(useStore.getState().editingTodoId).not.toBe(created);
   });
 
   it('это модальное окно с доступным именем и фокусом внутри', () => {

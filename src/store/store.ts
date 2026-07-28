@@ -52,6 +52,11 @@ export interface StoreState {
   moveDialogOpen: boolean;
   shortcutsOpen: boolean;
   settingsOpen: boolean;
+  /**
+   * The first-run introduction is modal: while it is up, keyboard shortcuts and
+   * menu commands must not reach the app behind it. Session-only, never stored.
+   */
+  onboardingOpen: boolean;
   /** Set when saving or loading the database failed; shown as a banner. */
   storageError?: string;
   /** Hydration ended with an error: the app must still render something. */
@@ -80,6 +85,7 @@ export interface StoreState {
   setMoveDialog: (open: boolean) => void;
   setShortcuts: (open: boolean) => void;
   setSettings: (open: boolean) => void;
+  setOnboarding: (open: boolean) => void;
 
   createTodo: (options?: { title?: string; target?: MoveTarget; when?: When }) => Id;
   updateTodo: (id: Id, patch: Partial<Omit<Todo, 'id'>>) => void;
@@ -358,6 +364,7 @@ export const useStore = create<StoreState>()(
         moveDialogOpen: false,
         shortcutsOpen: false,
         settingsOpen: false,
+        onboardingOpen: false,
         storageError: undefined,
         storageIssues: [],
         hydrationFailed: false,
@@ -476,6 +483,7 @@ export const useStore = create<StoreState>()(
         setMoveDialog: (open) => set((state) => void (state.moveDialogOpen = open)),
         setShortcuts: (open) => set((state) => void (state.shortcutsOpen = open)),
         setSettings: (open) => set((state) => void (state.settingsOpen = open)),
+        setOnboarding: (open) => set((state) => void (state.onboardingOpen = open)),
 
         createTodo: (options) => {
           const id = newId('td');
