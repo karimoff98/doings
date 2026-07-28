@@ -559,6 +559,37 @@ describe('пустые проекты', () => {
   });
 });
 
+describe('пустые области', () => {
+  it('новая область создаётся пустым черновиком', () => {
+    const id = store().createArea();
+    expect(store().db.areas.find((area) => area.id === id)?.title).toBe('');
+    expect(store().draftAreaId).toBe(id);
+  });
+
+  it('удаляет брошенную пустую область при уходе', () => {
+    const id = store().createArea();
+    store().selectList(`area:${id}`);
+    store().selectList('today');
+    expect(store().db.areas.some((area) => area.id === id)).toBe(false);
+    expect(store().draftAreaId).toBeUndefined();
+  });
+
+  it('сохраняет названную область при уходе', () => {
+    const id = store().createArea();
+    store().updateArea(id, { title: 'Работа' });
+    store().selectList('today');
+    expect(store().db.areas.find((area) => area.id === id)?.title).toBe('Работа');
+    expect(store().draftAreaId).toBeUndefined();
+  });
+
+  it('не удаляет пустую область, если в ней уже есть проект', () => {
+    const id = store().createArea();
+    store().createProject({ title: 'Проект', areaId: id });
+    store().selectList('today');
+    expect(store().db.areas.some((area) => area.id === id)).toBe(true);
+  });
+});
+
 describe('коалесинг ввода в один шаг undo', () => {
   it('весь сеанс правок текста — один шаг отмены', () => {
     const todo = byTitle('Позвонить в сервис');

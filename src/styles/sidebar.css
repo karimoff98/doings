@@ -201,6 +201,14 @@
   color: var(--danger, #d0342c);
 }
 
+.save-status--saved {
+  color: var(--c-logbook);
+}
+
+.save-status--saved .save-status__dot {
+  opacity: 0.8;
+}
+
 .save-status--error .save-status__dot {
   opacity: 1;
 }

@@ -143,6 +143,8 @@ export interface StoreState {
    * Session-only: it is not part of the persisted state.
    */
   draftProjectId?: Id;
+  /** Same lifecycle as a draft project, but for a newly created empty area. */
+  draftAreaId?: Id;
   clearFreshList: () => void;
   /** Asks the list header to focus its title, used by "Переименовать". */
   focusListTitle: (id: Id) => void;
@@ -333,6 +335,7 @@ export const useStore = create<StoreState>()(
           state.editingTodoId = undefined;
           state.freshTodoId = undefined;
           state.draftProjectId = undefined;
+          state.draftAreaId = undefined;
           state.tagFilter = [];
         });
       };
@@ -428,6 +431,19 @@ export const useStore = create<StoreState>()(
                 state.db.projects = state.db.projects.filter((p) => p.id !== draftId);
               }
               state.draftProjectId = undefined;
+            }
+            const draftAreaId = state.draftAreaId;
+            if (draftAreaId && key !== `area:${draftAreaId}`) {
+              const draft = state.db.areas.find((area) => area.id === draftAreaId);
+              const abandoned =
+                draft &&
+                !draft.title.trim() &&
+                !state.db.projects.some((project) => project.areaId === draftAreaId) &&
+                !state.db.todos.some((todo) => todo.areaId === draftAreaId);
+              if (abandoned) {
+                state.db.areas = state.db.areas.filter((area) => area.id !== draftAreaId);
+              }
+              state.draftAreaId = undefined;
             }
             state.selectedList = key;
             state.selectedTodoId = undefined;
@@ -922,20 +938,29 @@ export const useStore = create<StoreState>()(
             }
           }),
 
-        createArea: (title = 'Новая область') => {
+        createArea: (title = '') => {
           const id = newId('area');
-          set((state) => void (state.freshListId = id));
+          set((state) => {
+            state.freshListId = id;
+            state.draftAreaId = title.trim() ? undefined : id;
+          });
           mutate((db) => {
             db.areas.push({ id, title, tagIds: [], index: nextIndex(db.areas), collapsed: false });
           });
           return id;
         },
 
-        updateArea: (id, patch) =>
+        updateArea: (id, patch) => {
           mutate((db) => {
             const area = db.areas.find((a) => a.id === id);
             if (area) Object.assign(area, patch);
-          }),
+          });
+          if (typeof patch.title === 'string' && patch.title.trim()) {
+            set((state) => {
+              if (state.draftAreaId === id) state.draftAreaId = undefined;
+            });
+          }
+        },
 
         trashArea: (id) =>
           mutateAndKeepListValid((db) => {

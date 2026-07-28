@@ -818,6 +818,20 @@ function ListHeader() {
             aria-label="Название области"
             placeholder="Новая область"
             onChange={(event) => updateArea(area.id, { title: event.target.value })}
+            onBlur={(event) => {
+              const areaTitle = event.currentTarget.value.trim();
+              if (areaTitle !== area.title) updateArea(area.id, { title: areaTitle });
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                event.currentTarget.blur();
+              }
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                selectList('today');
+              }
+            }}
           />
         </div>
         <div className="listhead__tools">

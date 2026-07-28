@@ -521,7 +521,7 @@ export function Sidebar() {
                     style={{ textAlign: 'left' }}
                     onClick={() => selectList(areaKey)}
                   >
-                    {area.title}
+                    {area.title || 'Новая область'}
                   </button>
                 </div>
                 {!area.collapsed && projects.map((project) => renderProject(project, true))}

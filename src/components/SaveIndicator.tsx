@@ -11,9 +11,8 @@ const LABELS = {
  */
 export function SaveIndicator() {
   const status = useSaveStatus((s) => s.status);
-  // Success is intentionally silent: showing «Сохранено» after every small
-  // action makes the footer flicker. Only active work and failures need attention.
-  if (status === 'idle' || status === 'saved') return null;
+  if (status === 'idle') return null;
+  const saved = status === 'saved';
 
   return (
     <span
@@ -22,12 +21,15 @@ export function SaveIndicator() {
       title={
         status === 'error'
           ? 'Изменения не записаны на диск. Подробности — в сообщении приложения и в настройках.'
-          : undefined
+          : saved
+            ? 'Все изменения сохранены'
+            : undefined
       }
+      aria-label={saved ? 'Все изменения сохранены' : undefined}
       role={status === 'error' ? 'alert' : 'status'}
     >
       <span className="save-status__dot" aria-hidden="true" />
-      {LABELS[status]}
+      {!saved && LABELS[status]}
     </span>
   );
 }
