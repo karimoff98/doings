@@ -34,7 +34,7 @@ export function useKeyboard() {
 
       // The introduction is modal: nothing behind it may react to the keyboard,
       // not even Escape, which would otherwise dismiss it by accident.
-      if (store.onboardingOpen) {
+      if (store.onboardingOpen || store.tourOpen) {
         if (mod) event.preventDefault();
         return;
       }

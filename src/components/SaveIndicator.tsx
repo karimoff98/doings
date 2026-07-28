@@ -1,12 +1,7 @@
-import { useEffect, useState } from 'react';
 import { useSaveStatus } from '../store/saveStatus';
-
-/** How long the reassuring «Сохранено» stays on screen. */
-const SAVED_VISIBLE_MS = 2200;
 
 const LABELS = {
   saving: 'Сохранение…',
-  saved: 'Сохранено',
   error: 'Ошибка сохранения',
 } as const;
 
@@ -16,18 +11,9 @@ const LABELS = {
  */
 export function SaveIndicator() {
   const status = useSaveStatus((s) => s.status);
-  const savedAt = useSaveStatus((s) => s.savedAt);
-  const [showSaved, setShowSaved] = useState(false);
-
-  useEffect(() => {
-    if (status !== 'saved') return;
-    setShowSaved(true);
-    const timer = window.setTimeout(() => setShowSaved(false), SAVED_VISIBLE_MS);
-    return () => window.clearTimeout(timer);
-  }, [status, savedAt]);
-
-  if (status === 'idle') return null;
-  if (status === 'saved' && !showSaved) return null;
+  // Success is intentionally silent: showing «Сохранено» after every small
+  // action makes the footer flicker. Only active work and failures need attention.
+  if (status === 'idle' || status === 'saved') return null;
 
   return (
     <span

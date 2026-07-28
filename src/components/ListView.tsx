@@ -463,6 +463,7 @@ export function ListView() {
           type="button"
           className="magic-plus"
           data-testid="magic-plus"
+          data-tour="new-todo"
           aria-label="Новая задача"
           title={`Новая задача (${shortcutLabel('N')})`}
           onClick={() => createTodo()}

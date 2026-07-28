@@ -60,6 +60,7 @@ export function Onboarding() {
   const selectList = useStore((s) => s.selectList);
   const createTodo = useStore((s) => s.createTodo);
   const setOnboarding = useStore((s) => s.setOnboarding);
+  const startTour = useStore((s) => s.startTour);
   const mac = isMacPlatform();
 
   // Tells the keyboard and menu layers to stand down while this is up.
@@ -110,12 +111,13 @@ export function Onboarding() {
   if (!open) return null;
 
   /** Remembers the introduction as seen and hands the app over to the user. */
-  const finish = (withFirstTodo: boolean) => {
+  const finish = (withFirstTodo: boolean, withTour = false) => {
     markOnboardingComplete();
     setOpen(false);
     selectList('inbox');
     // A todo appears only when it was explicitly asked for.
     if (withFirstTodo) createTodo();
+    if (withTour) startTour();
   };
 
   const heading =
@@ -232,7 +234,7 @@ export function Onboarding() {
                 type="button"
                 className="settings__button onboard__primary"
                 data-autofocus
-                onClick={() => finish(false)}
+                onClick={() => finish(false, true)}
               >
                 Начать работу
               </button>

@@ -438,6 +438,7 @@ export function Sidebar() {
           .filter(Boolean)
           .join(' ')}
         data-testid={`sidebar-${key}`}
+        data-tour={`list-${key}`}
         onClick={() => selectList(key)}
         onContextMenu={(event) => openMenu(event, meta.title, smartMenu(key))}
         {...dropTarget.bind(key)}
@@ -554,6 +555,7 @@ export function Sidebar() {
           className="sidebar__action"
           aria-label="Горячие клавиши"
           title="Горячие клавиши"
+          data-tour="shortcuts"
           onClick={() => setShortcuts(true)}
         >
           <Icon name="keyboard" size={14} />
@@ -564,6 +566,7 @@ export function Sidebar() {
           aria-label="Настройки"
           title={`Настройки (${comboLabel('mod+,')})`}
           data-testid="open-settings"
+          data-tour="settings"
           onClick={() => setSettings(true)}
         >
           <Icon name="gear" size={14} />

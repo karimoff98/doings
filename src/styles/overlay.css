@@ -413,6 +413,7 @@
 .settings__footer {
   display: flex;
   justify-content: flex-end;
+  gap: 10px;
   margin-top: 14px;
 }
 
@@ -704,6 +705,107 @@
   .onboard__scrim,
   .onboard,
   .onboard__body {
+    animation: none;
+  }
+}
+
+/* Guided tour: four shades leave the real control in a clickable spotlight. */
+.tour {
+  position: fixed;
+  inset: 0;
+  z-index: 92;
+  pointer-events: none;
+}
+
+.tour__shade {
+  position: fixed;
+  z-index: 92;
+  background: color-mix(in srgb, var(--bg-overlay) 88%, black 24%);
+  pointer-events: auto;
+}
+
+.tour__focus {
+  position: fixed;
+  z-index: 93;
+  border: 2px solid var(--accent);
+  border-radius: 10px;
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--accent) 24%, transparent),
+    0 8px 28px rgba(0, 0, 0, 0.2);
+  pointer-events: none;
+  animation: tour-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes tour-pulse {
+  50% {
+    box-shadow:
+      0 0 0 7px color-mix(in srgb, var(--accent) 10%, transparent),
+      0 8px 28px rgba(0, 0, 0, 0.2);
+  }
+}
+
+.tour__card {
+  position: fixed;
+  z-index: 96;
+  width: 330px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--bg-card);
+  box-shadow: var(--shadow-pop);
+  pointer-events: auto;
+  animation: dialog-in var(--dur-med) var(--ease);
+}
+
+.tour__eyebrow {
+  margin-bottom: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.tour__title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.tour__text {
+  min-height: 58px;
+  margin: 8px 0 16px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.tour__instruction {
+  margin: -7px 0 13px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.tour__actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.tour__spacer {
+  flex: 1;
+}
+
+@media (max-width: 720px) {
+  .tour__card {
+    width: min(330px, calc(100vw - 28px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tour__focus,
+  .tour__card {
     animation: none;
   }
 }

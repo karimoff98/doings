@@ -58,6 +58,9 @@ export interface StoreState {
    * menu commands must not reach the app behind it. Session-only, never stored.
    */
   onboardingOpen: boolean;
+  /** Interactive spotlight tour shown after the first-run introduction. */
+  tourOpen: boolean;
+  tourStep: number;
   /** Set when saving or loading the database failed; shown as a banner. */
   storageError?: string;
   /** Hydration ended with an error: the app must still render something. */
@@ -87,6 +90,9 @@ export interface StoreState {
   setShortcuts: (open: boolean) => void;
   setSettings: (open: boolean) => void;
   setOnboarding: (open: boolean) => void;
+  startTour: () => void;
+  stopTour: () => void;
+  setTourStep: (step: number) => void;
 
   createTodo: (options?: { title?: string; target?: MoveTarget; when?: When }) => Id;
   updateTodo: (id: Id, patch: Partial<Omit<Todo, 'id'>>) => void;
@@ -395,6 +401,8 @@ export const useStore = create<StoreState>()(
         shortcutsOpen: false,
         settingsOpen: false,
         onboardingOpen: false,
+        tourOpen: false,
+        tourStep: 0,
         storageError: undefined,
         storageIssues: [],
         hydrationFailed: false,
@@ -514,6 +522,21 @@ export const useStore = create<StoreState>()(
         setShortcuts: (open) => set((state) => void (state.shortcutsOpen = open)),
         setSettings: (open) => set((state) => void (state.settingsOpen = open)),
         setOnboarding: (open) => set((state) => void (state.onboardingOpen = open)),
+        startTour: () =>
+          set((state) => {
+            state.quickFindOpen = false;
+            state.moveDialogOpen = false;
+            state.shortcutsOpen = false;
+            state.settingsOpen = false;
+            state.tourStep = 0;
+            state.tourOpen = true;
+          }),
+        stopTour: () =>
+          set((state) => {
+            state.tourOpen = false;
+            state.tourStep = 0;
+          }),
+        setTourStep: (step) => set((state) => void (state.tourStep = Math.max(0, step))),
 
         createTodo: (options) => {
           const id = newId('td');

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ListView } from './components/ListView';
+import { GuidedTour } from './components/GuidedTour';
 import { MoveDialog } from './components/MoveDialog';
 import { Onboarding } from './components/Onboarding';
 import { QuickFind } from './components/QuickFind';
@@ -85,6 +86,7 @@ export function App() {
       <SettingsDialog />
       <StorageNotice />
       {!troubled && <Onboarding />}
+      {!troubled && <GuidedTour />}
     </div>
   );
 }

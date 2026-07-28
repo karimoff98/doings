@@ -121,6 +121,8 @@ beforeEach(() => {
     selection: [],
     selectedTodoId: undefined,
     onboardingOpen: false,
+    tourOpen: false,
+    tourStep: 0,
   });
 });
 
@@ -249,6 +251,8 @@ describe('онбординг', () => {
     click('Продолжить');
     click('Начать работу');
     expect(useStore.getState().onboardingOpen).toBe(false);
+    expect(useStore.getState().tourOpen).toBe(true);
+    act(() => useStore.getState().stopTour());
     const before = useStore.getState().db.todos.length;
 
     act(() => pressNewTodo());

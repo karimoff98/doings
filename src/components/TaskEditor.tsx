@@ -176,6 +176,7 @@ export function TaskEditor({ todo }: TaskEditorProps) {
       ref={card}
       className="editor"
       data-testid="task-editor"
+      data-tour="task-editor"
       onKeyDown={(event) => {
         if (event.key === 'Escape') {
           event.stopPropagation();

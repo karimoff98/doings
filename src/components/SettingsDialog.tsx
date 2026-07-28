@@ -39,6 +39,7 @@ export function SettingsDialog() {
   const importDatabase = useStore((s) => s.importDatabase);
   const resetToEmpty = useStore((s) => s.resetToEmpty);
   const loadDemoData = useStore((s) => s.loadDemoData);
+  const startTour = useStore((s) => s.startTour);
 
   const [status, setStatus] = useState<string | null>(null);
   const [path, setPath] = useState<string | null>(null);
@@ -354,6 +355,17 @@ export function SettingsDialog() {
           {status && <p className="settings__status">{status}</p>}
 
           <div className="settings__footer">
+            <button
+              type="button"
+              className="settings__button"
+              onClick={() => {
+                setSettings(false);
+                window.setTimeout(startTour, 0);
+              }}
+            >
+              <Icon name="star" size={13} />
+              Повторить знакомство
+            </button>
             <button type="button" className="settings__button" onClick={() => setSettings(false)}>
               Готово
             </button>
