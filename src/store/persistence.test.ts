@@ -132,39 +132,47 @@ describe('файловое хранилище', () => {
     await vi.waitFor(() => expect(errors.join(' ')).toContain('Не удалось сохранить'));
   });
 
-  it('сохранения идут строго по очереди', async () => {
-    // Медленный диск: два сохранения внахлёст боролись бы за один временный файл.
+  it('второе сохранение ждёт, пока идёт первое', async () => {
+    // Запись длится дольше, чем задержка перед сохранением (250 мс), поэтому
+    // второй вызов гарантированно пытается начаться, пока первый ещё в полёте.
+    const SAVE_MS = 500;
     const порядок: string[] = [];
     let активных = 0;
     let максимумОдновременно = 0;
     const save = vi.fn().mockImplementation(async (json: string) => {
       активных += 1;
       максимумОдновременно = Math.max(максимумОдновременно, активных);
-      порядок.push(`начало ${json.length}`);
-      await new Promise((resolve) => setTimeout(resolve, 120));
-      порядок.push(`конец ${json.length}`);
+      порядок.push(`начало ${json}`);
+      await new Promise((resolve) => setTimeout(resolve, SAVE_MS));
+      порядок.push(`конец ${json}`);
       активных -= 1;
       return true;
     });
     mockDesktop({ save });
     const { appStorage } = await loadModule();
 
-    appStorage.setItem('doings.v1', { state: { a: 1 }, version: 1 } as never);
+    appStorage.setItem('doings.v1', { snapshot: 'первый' } as never);
+    // 300 мс: задержка истекла, первая запись уже началась и продлится ещё 200.
     await new Promise((resolve) => setTimeout(resolve, 300));
-    appStorage.setItem('doings.v1', { state: { a: 22 }, version: 1 } as never);
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    appStorage.setItem('doings.v1', { state: { a: 333 }, version: 1 } as never);
-    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(3), { timeout: 3000 });
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(порядок).toEqual(['начало {"snapshot":"первый"}']);
+
+    appStorage.setItem('doings.v1', { snapshot: 'второй' } as never);
+    // 250 мс: задержка второй записи истекла, первая ещё не закончилась.
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    // Без очереди здесь уже шли бы две записи в один временный файл.
+    expect(активных).toBe(1);
+    expect(порядок).toEqual(['начало {"snapshot":"первый"}']);
+
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(2), { timeout: 3000 });
+    await vi.waitFor(() => expect(порядок).toHaveLength(4), { timeout: 3000 });
 
     expect(максимумОдновременно).toBe(1);
-    // Ни одно «начало» не оказывается между «начало» и «конец» другого.
-    expect(порядок.filter((_, i) => i % 2 === 0).every((line) => line.startsWith('начало'))).toBe(
-      true,
-    );
-    // Последним на диск уходит последний снимок.
-    const последний = save.mock.calls.at(-1)?.[0] as string;
-    expect(порядок.at(-1)).toBe(`конец ${последний.length}`);
+    expect(порядок).toEqual([
+      'начало {"snapshot":"первый"}',
+      'конец {"snapshot":"первый"}',
+      'начало {"snapshot":"второй"}',
+      'конец {"snapshot":"второй"}',
+    ]);
   });
 
   it('после удачного сохранения та же ошибка снова показывается', async () => {

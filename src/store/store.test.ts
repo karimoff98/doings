@@ -394,3 +394,38 @@ describe('восстановление проекта', () => {
     expect(after.filter((t) => t.id !== удалённаяРаньше.id).every((t) => !t.trashed)).toBe(true);
   });
 });
+
+describe('возобновление проекта с повторяющейся задачей', () => {
+  it('в серии остаётся ровно одна открытая задача', () => {
+    const project = store().db.projects.find((p) => p.title === 'Запуск приложения')!;
+    const todo = store().db.todos.find((t) => t.projectId === project.id)!;
+    store().setWhen(todo.id, { kind: 'today' });
+    store().setRepeat(todo.id, { unit: 'day', every: 1 });
+
+    store().completeProject(project.id);
+    store().completeProject(project.id);
+
+    const series = store().db.todos.filter(
+      (item) => (item.seriesId ?? item.id) === todo.id && !item.trashed,
+    );
+    const открытых = series.filter((item) => item.status === 'open');
+    // Иначе рутина существовала бы дважды: копия во Входящих и оригинал в проекте.
+    expect(открытых).toHaveLength(1);
+  });
+
+  it('обычные задачи проекта возвращаются в открытое состояние', () => {
+    const project = store().db.projects.find((p) => p.title === 'Запуск приложения')!;
+    const обычных = store().db.todos.filter(
+      (t) => t.projectId === project.id && t.status === 'open' && !t.repeat,
+    ).length;
+
+    store().completeProject(project.id);
+    store().completeProject(project.id);
+
+    expect(
+      store().db.todos.filter(
+        (t) => t.projectId === project.id && t.status === 'open' && !t.repeat,
+      ),
+    ).toHaveLength(обычных);
+  });
+});

@@ -203,6 +203,18 @@ function validList(db: Database, key: ListKey): ListKey {
   return key;
 }
 
+/** True when another live todo of the same repeat series already exists. */
+function hasOpenSibling(db: Database, todo: Todo): boolean {
+  const series = todo.seriesId ?? todo.id;
+  return db.todos.some(
+    (other) =>
+      other.id !== todo.id &&
+      other.status === 'open' &&
+      !other.trashed &&
+      (other.seriesId ?? other.id) === series,
+  );
+}
+
 /** Nothing the user actually typed: safe to throw away when the editor closes. */
 function isBlank(todo: Todo): boolean {
   return (
@@ -733,6 +745,9 @@ export const useStore = create<StoreState>()(
                   spawned.push(next);
                 }
               } else if (previousStamp && todo.completedAt === previousStamp) {
+                // Its series may already continue in the Inbox: reopening the
+                // original would leave two live copies of the same routine.
+                if (todo.repeat && hasOpenSibling(db, todo)) continue;
                 todo.status = 'open';
                 todo.completedAt = undefined;
               }

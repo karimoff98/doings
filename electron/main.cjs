@@ -37,20 +37,34 @@ function whenRendererReady() {
 }
 
 /**
+ * The single way to bring the app forward. On macOS the red button closes the
+ * window but keeps the process running, so every entry point — relaunch from
+ * Dock, Quick Entry, a reminder — has to be able to recreate it.
+ */
+function revealMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    rendererReady = false;
+    createWindow();
+  }
+  if (!mainWindow) return null;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+  return mainWindow;
+}
+
+/**
  * Delivers a command to the main window, creating and showing it first when the
  * user has closed it. Waits for the renderer, otherwise the message arrives
  * before anything is listening and the todo silently disappears.
  */
 async function deliverToMainWindow(command, payload) {
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    rendererReady = false;
-    createWindow();
-  }
-  if (!mainWindow) return;
-  mainWindow.show();
-  mainWindow.focus();
+  const target = revealMainWindow();
+  if (!target) return;
   await whenRendererReady();
-  mainWindow.webContents.send('menu:command', command, payload);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('menu:command', command, payload);
+  }
 }
 
 function createWindow() {
@@ -299,14 +313,7 @@ ipcMain.on('quick:submit', async (_event, title) => {
 
 ipcMain.on('quick:close', () => quickWindow?.hide());
 
-ipcMain.on('window:focus', async () => {
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    rendererReady = false;
-    createWindow();
-  }
-  mainWindow?.show();
-  mainWindow?.focus();
-});
+ipcMain.on('window:focus', () => revealMainWindow());
 
 function buildMenu() {
   const command = (label, accelerator, id) => ({
@@ -411,12 +418,8 @@ function buildMenu() {
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', () => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.focus();
-    }
-  });
+  // Launching the app again while it runs without windows must bring it back.
+  app.on('second-instance', () => revealMainWindow());
 
   app.whenReady().then(async () => {
     await migrateUserData();
@@ -429,9 +432,8 @@ if (!app.requestSingleInstanceLock()) {
       console.warn(`Quick Entry shortcut ${QUICK_ENTRY_SHORTCUT} is taken by another app`);
     }
 
-    app.on('activate', () => {
-      if (!BrowserWindow.getAllWindows().filter((w) => w !== quickWindow).length) createWindow();
-    });
+    // Clicking the Dock icon after closing the window reopens it.
+    app.on('activate', () => revealMainWindow());
   });
 
   app.on('will-quit', () => globalShortcut.unregisterAll());
