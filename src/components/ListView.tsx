@@ -464,7 +464,7 @@ export function ListView() {
           className="magic-plus"
           data-testid="magic-plus"
           aria-label="Новая задача"
-          title="Новая задача (⌘N)"
+          title={`Новая задача (${shortcutLabel('N')})`}
           onClick={() => createTodo()}
         >
           <Icon name="plus" size={20} />

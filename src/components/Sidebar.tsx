@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { DragEvent, MouseEvent as ReactMouseEvent } from 'react';
 import { SMART_LIST_META, listCount, projectProgress, projectTitle } from '../domain/lists';
-import { shiftShortcutLabel } from '../domain/platform';
+import { comboLabel, shiftShortcutLabel } from '../domain/platform';
 import type { Area, ListKey, Project, SmartList } from '../domain/types';
 import { useStore } from '../store/store';
 import { ProgressRing } from './Checkbox';
@@ -247,7 +247,7 @@ export function Sidebar() {
                 key: 'new-todo',
                 label: 'Новая задача',
                 icon: 'plus' as IconName,
-                hint: '⌘N',
+                hint: comboLabel('mod+N'),
                 run: () => {
                   selectList(key);
                   createTodo();
@@ -562,7 +562,7 @@ export function Sidebar() {
           type="button"
           className="sidebar__action"
           aria-label="Настройки"
-          title="Настройки (⌘,)"
+          title={`Настройки (${comboLabel('mod+,')})`}
           data-testid="open-settings"
           onClick={() => setSettings(true)}
         >
