@@ -316,7 +316,7 @@ export function TaskEditor({ todo }: TaskEditorProps) {
               onClick={() => setPanel('deadline')}
             >
               <Icon name="flag" size={12} />
-              {formatDayShort(todo.deadline)}
+              Срок: {formatDayShort(todo.deadline)}
             </button>
           )}
           {tags.map((tag) => (

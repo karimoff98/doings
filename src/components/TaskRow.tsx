@@ -163,7 +163,7 @@ export function TaskRow({
             data-tooltip={`Срок сдачи: ${formatDayShort(todo.deadline)}`}
           >
             <Icon name="flag" size={11} />
-            {formatDayShort(todo.deadline)}
+            Срок: {formatDayShort(todo.deadline)}
           </span>
         )}
 

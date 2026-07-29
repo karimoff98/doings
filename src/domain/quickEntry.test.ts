@@ -47,6 +47,29 @@ describe('умный быстрый ввод', () => {
     });
   });
 
+  it('понимает относительную дату через несколько дней', () => {
+    expect(parseQuickEntry('Купить билеты через 3 дня', monday)).toMatchObject({
+      title: 'Купить билеты',
+      when: { kind: 'scheduled', date: '2026-07-30' },
+    });
+  });
+
+  it('создаёт еженедельный повтор на названный день', () => {
+    expect(parseQuickEntry('Тренировка каждый понедельник в 19:00', monday)).toEqual({
+      title: 'Тренировка',
+      when: { kind: 'scheduled', date: '2026-08-03' },
+      deadline: undefined,
+      reminder: '19:00',
+      repeat: { unit: 'week', every: 1, weekdays: [1] },
+    });
+  });
+
+  it('правильно кодирует воскресенье как седьмой ISO-день', () => {
+    expect(parseQuickEntry('Позвонить каждое воскресенье', monday)).toMatchObject({
+      repeat: { unit: 'week', every: 1, weekdays: [7] },
+    });
+  });
+
   it('не вырезает похожие слова из обычного названия', () => {
     expect(parseQuickEntry('Обсудить завтрашний релиз', monday)).toEqual({
       title: 'Обсудить завтрашний релиз',

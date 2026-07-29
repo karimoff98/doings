@@ -39,7 +39,7 @@ const GROUPS: { title: string; items: [string, (mac: boolean) => string][] }[] =
       ['Сегодня вечером', (mac) => comboLabel('mod+E', mac)],
       ['Когда-нибудь', (mac) => comboLabel('mod+O', mac)],
       ['Убрать дату', (mac) => comboLabel('mod+R', mac)],
-      ['Выбрать дату', (mac) => comboLabel('mod+S', mac)],
+      ['Когда выполнить', (mac) => comboLabel('mod+S', mac)],
       ['Важное', (mac) => comboLabel('shift+mod+I', mac)],
       ['Срок сдачи', (mac) => comboLabel('shift+mod+D', mac)],
       ['Теги', (mac) => comboLabel('shift+mod+T', mac)],

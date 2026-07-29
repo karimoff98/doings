@@ -170,6 +170,17 @@ function createWindow() {
     return { action: 'deny' };
   });
 
+  // Custom menu accelerators can depend on the active keyboard layout. Match
+  // the physical Z key as well, so ⌘Z keeps working on Russian and other
+  // non-Latin layouts. The renderer decides between app history and native
+  // text-field undo.
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    const modifier = isMac ? input.meta : input.control;
+    if (!modifier || input.alt || input.code !== 'KeyZ') return;
+    event.preventDefault();
+    void deliverToMainWindow(input.shift ? 'redo' : 'undo');
+  });
+
   mainWindow.webContents.on('will-navigate', (event, url) => {
     const allowed = DEV_SERVER_URL && url.startsWith(DEV_SERVER_URL);
     if (!allowed) event.preventDefault();
@@ -213,7 +224,7 @@ function appUrl(hash) {
 function createQuickWindow() {
   quickWindow = new BrowserWindow({
     width: 560,
-    height: 96,
+    height: 126,
     show: false,
     frame: false,
     transparent: true,

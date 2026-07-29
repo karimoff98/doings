@@ -270,6 +270,13 @@
 }
 
 /* Right-click menu: same look as a popover, but anchored to the pointer. */
+.contextmenu__anchor {
+  position: fixed;
+  width: 0;
+  height: 0;
+  z-index: 80;
+}
+
 .contextmenu {
   position: fixed;
   z-index: 50;

@@ -200,6 +200,7 @@ export function createDemoDatabase(): Database {
         tagIds: [],
         status: 'completed',
         completedAt: `${today()}T09:12:00.000Z`,
+        loggedAt: `${today()}T09:12:00.000Z`,
         trashed: false,
         createdAt: now,
         index: next(),

@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import { comboLabel } from '../domain/platform';
 import { useStore } from '../store/store';
 import { Menu } from './Menu';
 import type { MenuItem, MenuPosition } from './Menu';
+import { DeadlinePopover, WhenPopover } from './WhenPopover';
 
 export type ContextMenuTarget = MenuPosition;
 
@@ -12,10 +14,12 @@ interface ContextMenuProps {
 
 /** Right-click menu for the selected todos, mirroring the keyboard shortcuts. */
 export function ContextMenu({ at, onClose }: ContextMenuProps) {
+  const [datePanel, setDatePanel] = useState<'when' | 'deadline' | null>(null);
   const db = useStore((s) => s.db);
   const selection = useStore((s) => s.selection);
   const anchor = useStore((s) => s.selectedTodoId);
   const setWhen = useStore((s) => s.setWhen);
+  const setDeadline = useStore((s) => s.setDeadline);
   const setImportant = useStore((s) => s.setImportant);
   const openEditorPanel = useStore((s) => s.openEditorPanel);
   const setMoveDialog = useStore((s) => s.setMoveDialog);
@@ -34,6 +38,33 @@ export function ContextMenu({ at, onClose }: ContextMenuProps) {
   const inTrash = todos.every((todo) => todo.trashed);
   const allDone = todos.every((todo) => todo.status === 'completed');
   const allImportant = todos.every((todo) => todo.important);
+  const anchorTodo = todos.find((todo) => todo.id === anchor) ?? todos[0];
+
+  if (datePanel) {
+    return (
+      <span
+        className="contextmenu__anchor anchor"
+        style={{ left: at.x, top: at.y }}
+        aria-label={datePanel === 'when' ? 'Выбор даты' : 'Выбор срока'}
+      >
+        {datePanel === 'when' ? (
+          <WhenPopover
+            open
+            when={anchorTodo.when}
+            onClose={onClose}
+            onPick={(when) => setWhen(selection, when)}
+          />
+        ) : (
+          <DeadlinePopover
+            open
+            deadline={anchorTodo.deadline}
+            onClose={onClose}
+            onPick={(deadline) => setDeadline(selection, deadline)}
+          />
+        )}
+      </span>
+    );
+  }
 
   const groups: MenuItem[][] = inTrash
     ? [
@@ -89,10 +120,11 @@ export function ContextMenu({ at, onClose }: ContextMenuProps) {
           },
           {
             key: 'when',
-            label: 'Выбрать дату…',
+            label: 'Когда выполнить…',
             icon: 'calendar',
             hint: comboLabel('mod+S'),
-            run: () => anchor && openEditorPanel(anchor, 'when'),
+            keepOpen: true,
+            run: () => setDatePanel('when'),
           },
           {
             key: 'deadline',
@@ -100,7 +132,8 @@ export function ContextMenu({ at, onClose }: ContextMenuProps) {
             icon: 'flag',
             color: 'var(--c-deadline)',
             hint: comboLabel('shift+mod+D'),
-            run: () => anchor && openEditorPanel(anchor, 'deadline'),
+            keepOpen: true,
+            run: () => setDatePanel('deadline'),
           },
           {
             key: 'tags',

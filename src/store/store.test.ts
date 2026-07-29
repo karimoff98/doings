@@ -17,6 +17,8 @@ function reset() {
     selectedList: 'today',
     selection: [],
     retainedCompletedIds: [],
+    completionLogging: 'on-list-change',
+    collapsedCompletedLists: [],
     selectedTodoId: undefined,
     selectionAnchor: undefined,
     editingTodoId: undefined,
@@ -35,6 +37,15 @@ function byTitle(title: string): Todo {
 beforeEach(reset);
 
 describe('пакетные действия и отмена', () => {
+  it('запоминает свёрнутые секции отдельно для каждого списка', () => {
+    store().toggleCompletedSection('today');
+    store().toggleCompletedSection('project:work');
+    expect(store().collapsedCompletedLists).toEqual(['today', 'project:work']);
+
+    store().toggleCompletedSection('today');
+    expect(store().collapsedCompletedLists).toEqual(['project:work']);
+  });
+
   it('переносят всю выборку и откатываются одним шагом', () => {
     const ids = store()
       .db.todos.filter((todo) => todo.status === 'open')
@@ -120,6 +131,54 @@ describe('пакетные действия и отмена', () => {
 
     expect(store().db.todos.find((todo) => todo.id === id)?.status).toBe('open');
     expect(store().retainedCompletedIds).not.toContain(id);
+  });
+
+  it('⌘Z отменяет выполнение вместе с созданной копией повторяющейся задачи', () => {
+    const id = store().createTodo({ title: 'Каждый день', when: { kind: 'today' } });
+    store().setRepeat(id, { unit: 'day', every: 1 });
+
+    store().completeTodo(id);
+    expect(store().db.todos.find((todo) => todo.id === id)?.status).toBe('completed');
+    expect(store().db.todos.filter((todo) => (todo.seriesId ?? todo.id) === id)).toHaveLength(2);
+
+    store().undo();
+    expect(store().db.todos.find((todo) => todo.id === id)?.status).toBe('open');
+    expect(store().db.todos.filter((todo) => (todo.seriesId ?? todo.id) === id)).toHaveLength(1);
+  });
+
+  it('режим «Сразу» не удерживает задачу в рабочем списке', () => {
+    store().setCompletionLogging('immediately');
+    const id = store().createTodo({ title: 'Сразу в Журнал', when: { kind: 'today' } });
+
+    store().completeTodo(id);
+
+    const todo = store().db.todos.find((item) => item.id === id);
+    expect(todo?.loggedAt).toBeTruthy();
+    expect(store().retainedCompletedIds).not.toContain(id);
+  });
+
+  it('ручной режим сохраняет выполненную задачу до явного переноса', () => {
+    store().setCompletionLogging('manual');
+    const id = store().createTodo({ title: 'Перенести позже', when: { kind: 'today' } });
+
+    store().completeTodo(id);
+    store().selectList('anytime');
+    store().selectList('today');
+
+    expect(store().db.todos.find((todo) => todo.id === id)?.loggedAt).toBeUndefined();
+    expect(
+      selectSections(store().db, 'today')
+        .flatMap((section) => section.rows)
+        .some((row) => row.kind === 'todo' && row.todo.id === id),
+    ).toBe(true);
+
+    store().logCompleted(id);
+    expect(store().db.todos.find((todo) => todo.id === id)?.loggedAt).toBeTruthy();
+    expect(
+      selectSections(store().db, 'today')
+        .flatMap((section) => section.rows)
+        .some((row) => row.kind === 'todo' && row.todo.id === id),
+    ).toBe(false);
   });
 });
 

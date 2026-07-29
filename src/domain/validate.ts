@@ -17,7 +17,7 @@ import type {
  * Bumped whenever the stored shape changes in a way that needs conversion.
  * Every migration step lives in MIGRATIONS below.
  */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 5;
 
 export interface ValidationResult {
   db: Database;
@@ -205,6 +205,7 @@ export function validateDatabase(raw: unknown): ValidationResult | null {
     tagIds: tagIds(row.tagIds),
     status: status(row.status),
     completedAt: optionalId(row.completedAt),
+    loggedAt: optionalId(row.loggedAt),
     trashed: bool(row.trashed),
     createdAt: timestamp(row.createdAt),
     index: num(row.index),
@@ -315,6 +316,35 @@ const MIGRATIONS: Record<number, Migration> = {
   // reserved so databases opened by it remain readable after the feature was
   // removed; normal validation drops its unused fields.
   2: (db) => db,
+  3: (db) => ({
+    ...db,
+    // Everything completed by earlier builds already lived in the Logbook.
+    todos: db.todos.map((todo) =>
+      todo.status === 'completed' || todo.status === 'canceled'
+        ? { ...todo, loggedAt: todo.loggedAt ?? todo.completedAt ?? todo.createdAt }
+        : { ...todo, loggedAt: undefined },
+    ),
+  }),
+  // Development builds could hot-reload after announcing v3 but before the
+  // migration ran. Repeating the idempotent repair makes those files safe too.
+  4: (db) => ({
+    ...db,
+    todos: db.todos.map((todo) =>
+      todo.status === 'completed' || todo.status === 'canceled'
+        ? { ...todo, loggedAt: todo.loggedAt ?? todo.completedAt ?? todo.createdAt }
+        : todo,
+    ),
+  }),
+  // The first v4 validator accidentally discarded the new field before the
+  // migration result was persisted. Run the repair once more for those files.
+  5: (db) => ({
+    ...db,
+    todos: db.todos.map((todo) =>
+      todo.status === 'completed' || todo.status === 'canceled'
+        ? { ...todo, loggedAt: todo.loggedAt ?? todo.completedAt ?? todo.createdAt }
+        : todo,
+    ),
+  }),
 };
 
 export function migrateDatabase(

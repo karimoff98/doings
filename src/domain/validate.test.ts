@@ -165,6 +165,69 @@ describe('loadDatabase: миграции схемы', () => {
     expect(loaded.issues.join(' ')).not.toContain('Схема обновлена');
   });
 
+  it('старые выполненные задачи остаются в Журнале после миграции', () => {
+    const loaded = loadDatabase({
+      version: 2,
+      db: {
+        ...empty,
+        todos: [
+          {
+            id: 'td_done',
+            title: 'Уже выполнена',
+            status: 'completed',
+            completedAt: '2026-07-29T10:00:00.000Z',
+          },
+        ],
+      },
+    });
+
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    expect(loaded.db.todos[0].loggedAt).toBe('2026-07-29T10:00:00.000Z');
+  });
+
+  it('чинит промежуточную схему без отметки переноса', () => {
+    const loaded = loadDatabase({
+      version: 3,
+      db: {
+        ...empty,
+        todos: [
+          {
+            id: 'td_done',
+            title: 'Из промежуточной сборки',
+            status: 'completed',
+            completedAt: '2026-07-29T11:00:00.000Z',
+          },
+        ],
+      },
+    });
+
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    expect(loaded.db.todos[0].loggedAt).toBe('2026-07-29T11:00:00.000Z');
+  });
+
+  it('чинит файл v4, валидатор которого потерял отметку переноса', () => {
+    const loaded = loadDatabase({
+      version: 4,
+      db: {
+        ...empty,
+        todos: [
+          {
+            id: 'td_done_v4',
+            title: 'Выполнена в v4',
+            status: 'completed',
+            completedAt: '2026-07-29T12:00:00.000Z',
+          },
+        ],
+      },
+    });
+
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    expect(loaded.db.todos[0].loggedAt).toBe('2026-07-29T12:00:00.000Z');
+  });
+
   it('мусор не проходит', () => {
     expect(loadDatabase({ todos: 'нет' })).toEqual({ ok: false, reason: 'invalid' });
   });

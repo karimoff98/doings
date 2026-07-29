@@ -1,10 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { shiftDay, today } from './dates';
-import { listCount, projectStats, selectSections, selectSectionsKeepingCompleted } from './lists';
+import {
+  COMPLETED_SECTION_ID,
+  listCount,
+  projectStats,
+  selectSections,
+  selectSectionsKeepingCompleted,
+  separateCompletedSection,
+} from './lists';
 import type { Database, ListKey, Project, Section, Todo } from './types';
 
 function todo(overrides: Partial<Todo> & { id: string }): Todo {
-  return {
+  const result: Todo = {
     title: overrides.id,
     notes: '',
     checklist: [],
@@ -16,6 +23,12 @@ function todo(overrides: Partial<Todo> & { id: string }): Todo {
     index: 0,
     ...overrides,
   };
+  // Existing completed fixtures model tasks already moved to the Logbook.
+  // A test can pass `loggedAt: undefined` explicitly for manual mode.
+  if (result.status === 'completed' && !('loggedAt' in overrides)) {
+    result.loggedAt = result.completedAt ?? result.createdAt;
+  }
+  return result;
 }
 
 function project(overrides: Partial<Project> & { id: string }): Project {
@@ -138,6 +151,24 @@ describe('Сегодня', () => {
 
     expect(row?.kind).toBe('todo');
     if (row?.kind === 'todo') expect(row.todo.status).toBe('completed');
+  });
+
+  it('ручное выполнение остаётся в списке, но не увеличивает счётчик', () => {
+    const manual = database({
+      todos: [
+        todo({
+          id: 'ожидает переноса',
+          when: { kind: 'today' },
+          status: 'completed',
+          completedAt: '2026-07-29T12:00:00.000Z',
+          loggedAt: undefined,
+        }),
+      ],
+    });
+
+    expect(titles(manual, 'today')).toEqual(['ожидает переноса']);
+    expect(titles(manual, 'logbook')).toEqual([]);
+    expect(listCount(manual, 'today')).toBe(0);
   });
 });
 
@@ -311,5 +342,53 @@ describe('Тег', () => {
       ],
     });
     expect(titles(db, 'tag:tag')).toEqual(['с тегом без проекта', 'с тегом в проекте']);
+  });
+});
+
+describe('секция выполненных', () => {
+  it('собирает завершённые задачи снизу и сохраняет рабочую секцию', () => {
+    const open = todo({ id: 'open', title: 'Открытая' });
+    const done = todo({
+      id: 'done',
+      title: 'Готовая',
+      status: 'completed',
+      completedAt: '2026-07-29T12:00:00.000Z',
+    });
+    const sections = separateCompletedSection([
+      {
+        id: 'today',
+        title: 'Сегодня',
+        rows: [
+          { kind: 'todo', todo: open },
+          { kind: 'todo', todo: done },
+        ],
+        reorderable: true,
+      },
+    ]);
+
+    expect(sections).toHaveLength(2);
+    expect(sections[0].rows).toEqual([{ kind: 'todo', todo: open }]);
+    expect(sections[0].reorderable).toBe(true);
+    expect(sections[1]).toMatchObject({
+      id: COMPLETED_SECTION_ID,
+      title: 'Выполненные',
+      rows: [{ kind: 'todo', todo: done }],
+      muted: true,
+    });
+  });
+
+  it('заменяет старую секцию выполненного проекта общей секцией', () => {
+    const done = todo({ id: 'done', status: 'completed' });
+    const sections = separateCompletedSection([
+      { id: 'root', rows: [], reorderable: true },
+      {
+        id: 'done',
+        title: 'Выполнено',
+        rows: [{ kind: 'todo', todo: done }],
+        muted: true,
+      },
+    ]);
+
+    expect(sections.map((section) => section.id)).toEqual(['root', COMPLETED_SECTION_ID]);
   });
 });

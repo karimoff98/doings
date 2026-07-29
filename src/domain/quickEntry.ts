@@ -1,12 +1,13 @@
 import { addDays } from 'date-fns';
 import { toIsoDay } from './dates';
-import type { IsoDay, When } from './types';
+import type { IsoDay, RepeatRule, When } from './types';
 
 export interface ParsedQuickEntry {
   title: string;
   when: When;
   deadline?: IsoDay;
   reminder?: string;
+  repeat?: RepeatRule;
 }
 
 interface DateMatch {
@@ -18,13 +19,23 @@ const SEPARATOR = String.raw`(?=$|[\s,.!?;:])`;
 const PREFIX = String.raw`(^|[\s,;])`;
 
 const WEEKDAYS = [
-  { scheduled: 'понедельник', deadline: 'понедельника', day: 1 },
-  { scheduled: 'вторник', deadline: 'вторника', day: 2 },
-  { scheduled: 'среду', deadline: 'среды', day: 3 },
-  { scheduled: 'четверг', deadline: 'четверга', day: 4 },
-  { scheduled: 'пятницу', deadline: 'пятницы', day: 5 },
-  { scheduled: 'субботу', deadline: 'субботы', day: 6 },
-  { scheduled: 'воскресенье', deadline: 'воскресенья', day: 0 },
+  {
+    scheduled: 'понедельник',
+    deadline: 'понедельника',
+    repeat: 'каждый понедельник',
+    day: 1,
+  },
+  { scheduled: 'вторник', deadline: 'вторника', repeat: 'каждый вторник', day: 2 },
+  { scheduled: 'среду', deadline: 'среды', repeat: 'каждую среду', day: 3 },
+  { scheduled: 'четверг', deadline: 'четверга', repeat: 'каждый четверг', day: 4 },
+  { scheduled: 'пятницу', deadline: 'пятницы', repeat: 'каждую пятницу', day: 5 },
+  { scheduled: 'субботу', deadline: 'субботы', repeat: 'каждую субботу', day: 6 },
+  {
+    scheduled: 'воскресенье',
+    deadline: 'воскресенья',
+    repeat: 'каждое воскресенье',
+    day: 0,
+  },
 ] as const;
 
 function replaceFirst(text: string, pattern: RegExp): { text: string; found: boolean } {
@@ -83,6 +94,16 @@ function parseScheduledDay(text: string, now: Date): DateMatch | undefined {
     if (result.found) return { day: dayAfter(now, item.offset), text: result.text };
   }
 
+  let offset: number | undefined;
+  const after = text.replace(
+    new RegExp(`${PREFIX}через\\s+([1-9]\\d{0,2})\\s+(?:день|дня|дней)${SEPARATOR}`, 'iu'),
+    (_match, prefix: string, days: string) => {
+      offset = Number(days);
+      return prefix;
+    },
+  );
+  if (offset !== undefined) return { day: dayAfter(now, offset), text: after };
+
   for (const item of WEEKDAYS) {
     const result = replaceFirst(
       text,
@@ -91,6 +112,20 @@ function parseScheduledDay(text: string, now: Date): DateMatch | undefined {
     if (result.found) return { day: nextWeekday(now, item.day), text: result.text };
   }
 
+  return undefined;
+}
+
+function parseRepeat(text: string, now: Date): (DateMatch & { repeat: RepeatRule }) | undefined {
+  for (const item of WEEKDAYS) {
+    const result = replaceFirst(text, new RegExp(`${PREFIX}${item.repeat}${SEPARATOR}`, 'iu'));
+    if (result.found) {
+      return {
+        day: nextWeekday(now, item.day),
+        text: result.text,
+        repeat: { unit: 'week', every: 1, weekdays: [item.day || 7] },
+      };
+    }
+  }
   return undefined;
 }
 
@@ -125,6 +160,9 @@ export function parseQuickEntry(input: string, now = new Date()): ParsedQuickEnt
   const deadline = parseDeadline(remaining, now);
   if (deadline) remaining = deadline.text;
 
+  const repeat = parseRepeat(remaining, now);
+  if (repeat) remaining = repeat.text;
+
   const scheduled = parseScheduledDay(remaining, now);
   if (scheduled) remaining = scheduled.text;
 
@@ -134,7 +172,9 @@ export function parseQuickEntry(input: string, now = new Date()): ParsedQuickEnt
   // A reminder needs a day. With no explicit scheduled day, a deadline supplies
   // it; otherwise a bare "в 18:00" naturally means today.
   const scheduledDay =
-    scheduled?.day ?? (time.reminder ? (deadline?.day ?? dayAfter(now, 0)) : undefined);
+    scheduled?.day ??
+    repeat?.day ??
+    (time.reminder ? (deadline?.day ?? dayAfter(now, 0)) : undefined);
   const when: When = scheduledDay
     ? scheduledDay === dayAfter(now, 0)
       ? { kind: 'today' }
@@ -146,5 +186,6 @@ export function parseQuickEntry(input: string, now = new Date()): ParsedQuickEnt
     when,
     deadline: deadline?.day,
     reminder: time.reminder,
+    ...(repeat ? { repeat: repeat.repeat } : {}),
   };
 }

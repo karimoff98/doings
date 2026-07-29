@@ -67,6 +67,8 @@ export interface Todo {
   tagIds: Id[];
   status: ItemStatus;
   completedAt?: string;
+  /** Completion is visible in the Logbook only after this moment. */
+  loggedAt?: string;
   trashed: boolean;
   createdAt: string;
   /** Manual sort position inside its list. Lower comes first. */

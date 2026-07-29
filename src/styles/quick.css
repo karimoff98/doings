@@ -38,6 +38,48 @@
   -webkit-app-region: no-drag;
 }
 
+.quick__preview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  padding-left: 28px;
+  overflow: hidden;
+  -webkit-app-region: no-drag;
+}
+
+.quick__preview-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick__tokens {
+  flex: none;
+  display: flex;
+  gap: 5px;
+}
+
+.quick__token {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.quick__preview-empty {
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
 .quick__hint {
   display: flex;
   justify-content: space-between;

@@ -3,12 +3,14 @@ import type { DragEvent, MouseEvent } from 'react';
 import { formatDayLong, formatDayShort, formatWeekday, tomorrow } from '../domain/dates';
 import { shortcutLabel } from '../domain/platform';
 import {
+  COMPLETED_SECTION_ID,
   SMART_LIST_META,
   listTitle,
   projectProgress,
   projectStats,
   projectTitle,
   selectSectionsKeepingCompleted,
+  separateCompletedSection,
 } from '../domain/lists';
 import { parseListKey } from '../domain/types';
 import type { Database, Id, ItemStatus, Section, Tag } from '../domain/types';
@@ -113,6 +115,9 @@ export function ListView() {
   const selectedList = useStore((s) => s.selectedList);
   const selection = useStore((s) => s.selection);
   const retainedCompletedIds = useStore((s) => s.retainedCompletedIds);
+  const completionLogging = useStore((s) => s.completionLogging);
+  const collapsedCompletedLists = useStore((s) => s.collapsedCompletedLists ?? []);
+  const toggleCompletedSection = useStore((s) => s.toggleCompletedSection);
   const selectedTodoId = useStore((s) => s.selectedTodoId);
   const selectionAnchor = useStore((s) => s.selectionAnchor);
   const editingTodoId = useStore((s) => s.editingTodoId);
@@ -124,6 +129,7 @@ export function ListView() {
   const openEditor = useStore((s) => s.openEditor);
   const completeTodo = useStore((s) => s.completeTodo);
   const uncompleteTodo = useStore((s) => s.uncompleteTodo);
+  const logCompleted = useStore((s) => s.logCompleted);
   const restoreTodo = useStore((s) => s.restoreTodo);
   const createTodo = useStore((s) => s.createTodo);
   const emptyTrash = useStore((s) => s.emptyTrash);
@@ -163,22 +169,52 @@ export function ListView() {
     () => tagFilter.filter((id) => availableTags.some((tag) => tag.id === id)),
     [tagFilter, availableTags],
   );
-  const sections = useMemo(
+  const filteredSections = useMemo(
     () => applyTagFilter(allSections, activeFilter),
     [allSections, activeFilter],
+  );
+  const sections = useMemo(
+    () =>
+      list.kind === 'logbook' || list.kind === 'trash'
+        ? filteredSections
+        : separateCompletedSection(filteredSections),
+    [filteredSections, list.kind],
   );
   const monthView = list.kind === 'upcoming' && upcomingView === 'month';
   const visibleSections = useMemo(
     () => (monthView ? sections.filter((section) => section.id === calendarDay) : sections),
     [monthView, sections, calendarDay],
   );
+  const completedCollapsed = collapsedCompletedLists.includes(selectedList);
+  const completedCount =
+    visibleSections.find((section) => section.id === COMPLETED_SECTION_ID)?.rows.length ?? 0;
+  const renderedSections = useMemo(
+    () =>
+      completedCollapsed
+        ? visibleSections.map((section) =>
+            section.id === COMPLETED_SECTION_ID ? { ...section, rows: [] } : section,
+          )
+        : visibleSections,
+    [completedCollapsed, visibleSections],
+  );
   const options = rowOptions(list.kind);
   const hasRows = sections.some((section) => section.rows.length > 0);
   const selectedDayHasRows = visibleSections.some((section) => section.rows.length > 0);
   const visibleIds = useMemo(
     () =>
-      visibleSections.flatMap((section) =>
+      renderedSections.flatMap((section) =>
         section.rows.flatMap((row) => (row.kind === 'todo' ? [row.todo.id] : [])),
+      ),
+    [renderedSections],
+  );
+  const waitingForLogIds = useMemo(
+    () =>
+      visibleSections.flatMap((section) =>
+        section.rows.flatMap((row) =>
+          row.kind === 'todo' && row.todo.status === 'completed' && !row.todo.loggedAt
+            ? [row.todo.id]
+            : [],
+        ),
       ),
     [visibleSections],
   );
@@ -345,7 +381,7 @@ export function ListView() {
           </p>
         )}
 
-        {visibleSections.map((section) => {
+        {renderedSections.map((section) => {
           const droppable = Boolean(section.reorderable && draggingIds.length);
           // Drop-target-only groups stay out of the way until something is dragged.
           if (section.placeholder && !draggingIds.length) return null;
@@ -372,7 +408,24 @@ export function ListView() {
               }
             >
               {!monthView &&
-                (section.title && section.container?.headingId ? (
+                (section.id === COMPLETED_SECTION_ID ? (
+                  <button
+                    type="button"
+                    className="section__head section__head--toggle"
+                    aria-expanded={!completedCollapsed}
+                    onClick={() => toggleCompletedSection(selectedList)}
+                  >
+                    <span className="section__title">
+                      <Icon
+                        name="chevron-right"
+                        size={13}
+                        className={completedCollapsed ? '' : 'section__disclosure--open'}
+                      />
+                      {section.title}
+                      <span className="section__count">{completedCount}</span>
+                    </span>
+                  </button>
+                ) : section.title && section.container?.headingId ? (
                   <HeadingRow id={section.container.headingId} title={section.title} />
                 ) : (
                   section.title && (
@@ -413,7 +466,7 @@ export function ListView() {
                       areasById={areasById}
                       tagsById={tagsById}
                       selected={selectedIds.has(todo.id)}
-                      draggable={Boolean(section.reorderable)}
+                      draggable={Boolean(section.reorderable && todo.status === 'open')}
                       dragging={draggedIds.has(todo.id)}
                       dropEdge={isDropTarget ? drop?.edge : undefined}
                       muted={section.muted}
@@ -459,6 +512,19 @@ export function ListView() {
             </section>
           );
         })}
+
+        {completionLogging === 'manual' && waitingForLogIds.length > 0 && (
+          <div className="log-completed">
+            <button
+              type="button"
+              className="sidebar__action"
+              onClick={() => logCompleted(waitingForLogIds)}
+            >
+              <Icon name="book" size={13} />
+              Перенести выполненные в Журнал
+            </button>
+          </div>
+        )}
 
         {list.kind === 'trash' && hasRows && (
           <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>

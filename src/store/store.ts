@@ -32,6 +32,7 @@ import {
 import { createDemoDatabase, createEmptyDatabase, newId } from './seed';
 
 export type Theme = 'system' | 'light' | 'dark';
+export type CompletionLogging = 'immediately' | 'on-list-change' | 'manual';
 
 /** Where a todo should live after a move. */
 export type MoveTarget = Container;
@@ -59,6 +60,9 @@ export interface StoreState {
   /** Panel the editor should open automatically, set by keyboard shortcuts. */
   autoPanel?: 'when' | 'deadline' | 'tags' | 'repeat' | 'reminder';
   theme: Theme;
+  completionLogging: CompletionLogging;
+  /** Working lists whose completed section the user folded away. */
+  collapsedCompletedLists: ListKey[];
   /** Tags picked in the list's tag bar; empty means no filtering. */
   tagFilter: Id[];
   quickFindOpen: boolean;
@@ -95,6 +99,8 @@ export interface StoreState {
   clearAutoPanel: () => void;
   closeEditor: () => void;
   setTheme: (theme: Theme) => void;
+  setCompletionLogging: (mode: CompletionLogging) => void;
+  toggleCompletedSection: (key: ListKey) => void;
   toggleTagFilter: (tagId: Id) => void;
   clearTagFilter: () => void;
   setQuickFind: (open: boolean) => void;
@@ -112,6 +118,7 @@ export interface StoreState {
     when?: When;
     deadline?: IsoDay;
     reminder?: string;
+    repeat?: RepeatRule;
     important?: boolean;
     tagIds?: Id[];
   }) => Id;
@@ -134,6 +141,7 @@ export interface StoreState {
   removeTag: (id: Id) => void;
   completeTodo: (ids: Id | Id[]) => void;
   uncompleteTodo: (ids: Id | Id[]) => void;
+  logCompleted: (ids?: Id | Id[]) => void;
   cancelTodo: (ids: Id | Id[]) => void;
   trashTodo: (ids: Id | Id[]) => void;
   restoreTodo: (ids: Id | Id[]) => void;
@@ -358,7 +366,9 @@ const storeStorage = appStorage
         return (
           previous.db === next.db &&
           previous.selectedList === next.selectedList &&
-          previous.theme === next.theme
+          previous.theme === next.theme &&
+          previous.completionLogging === next.completionLogging &&
+          previous.collapsedCompletedLists === next.collapsedCompletedLists
         );
       },
     )
@@ -518,6 +528,8 @@ export const useStore = create<StoreState>()(
         freshTodoId: undefined,
         autoPanel: undefined,
         theme: 'system',
+        completionLogging: 'on-list-change',
+        collapsedCompletedLists: [],
         tagFilter: [],
         quickFindOpen: false,
         moveDialogOpen: false,
@@ -650,6 +662,35 @@ export const useStore = create<StoreState>()(
 
         setTheme: (theme) => set((state) => void (state.theme = theme)),
 
+        setCompletionLogging: (mode) => {
+          if (mode === get().completionLogging) return;
+          // Leaving manual mode must not strand completed tasks outside both
+          // their working lists and the Logbook.
+          const hasWaiting = get().db.todos.some(
+            (todo) => todo.status === 'completed' && !todo.loggedAt,
+          );
+          if (mode !== 'manual' && hasWaiting) {
+            const stamp = new Date().toISOString();
+            mutate((db) => {
+              for (const todo of db.todos) {
+                if (todo.status === 'completed' && !todo.loggedAt) todo.loggedAt = stamp;
+              }
+            });
+          }
+          set((state) => {
+            state.completionLogging = mode;
+            state.retainedCompletedIds = [];
+          });
+        },
+
+        toggleCompletedSection: (key) =>
+          set((state) => {
+            const collapsed = state.collapsedCompletedLists ?? [];
+            state.collapsedCompletedLists = collapsed.includes(key)
+              ? collapsed.filter((item) => item !== key)
+              : [...collapsed, key];
+          }),
+
         toggleTagFilter: (tagId) =>
           set((state) => {
             state.tagFilter = state.tagFilter.includes(tagId)
@@ -712,6 +753,7 @@ export const useStore = create<StoreState>()(
               when: options?.when ?? defaults.when,
               deadline: options?.deadline,
               reminder: options?.reminder,
+              repeat: options?.repeat,
               important: options?.important ?? defaults.important,
               tagIds: inheritedTags,
               status: 'open',
@@ -818,6 +860,7 @@ export const useStore = create<StoreState>()(
 
         completeTodo: (ids) => {
           const list = Array.isArray(ids) ? ids : [ids];
+          const logging = get().completionLogging;
           const visible = new Set(
             selectSections(get().db, get().selectedList).flatMap((section) =>
               section.rows.flatMap((row) => (row.kind === 'todo' ? [row.todo.id] : [])),
@@ -827,8 +870,10 @@ export const useStore = create<StoreState>()(
             // Trashed items cannot be worked on, and completing an already
             // completed todo would spawn a second copy of a repeating one.
             if (todo.trashed || todo.status !== 'open') return;
+            const stamp = new Date().toISOString();
             todo.status = 'completed';
-            todo.completedAt = new Date().toISOString();
+            todo.completedAt = stamp;
+            todo.loggedAt = logging === 'manual' ? undefined : stamp;
             const spawned = nextRepeatCopy(todo, newId);
             if (spawned) db.todos.push(spawned);
           });
@@ -836,6 +881,7 @@ export const useStore = create<StoreState>()(
             for (const id of list) {
               const todo = state.db.todos.find((item) => item.id === id);
               if (
+                logging === 'on-list-change' &&
                 visible.has(id) &&
                 todo?.status === 'completed' &&
                 !state.retainedCompletedIds.includes(id)
@@ -852,6 +898,7 @@ export const useStore = create<StoreState>()(
             if (todo.trashed) return;
             todo.status = 'open';
             todo.completedAt = undefined;
+            todo.loggedAt = undefined;
             // Reopening a repeating todo takes back the copy its completion spawned.
             if (!todo.repeat) return;
             const series = todo.seriesId ?? todo.id;
@@ -871,11 +918,32 @@ export const useStore = create<StoreState>()(
           });
         },
 
+        logCompleted: (ids) => {
+          const list = ids
+            ? Array.isArray(ids)
+              ? ids
+              : [ids]
+            : get()
+                .db.todos.filter((todo) => todo.status === 'completed' && !todo.loggedAt)
+                .map((todo) => todo.id);
+          if (!list.length) return;
+          const stamp = new Date().toISOString();
+          mutateEach(list, (todo) => {
+            if (todo.status === 'completed' && !todo.loggedAt) todo.loggedAt = stamp;
+          });
+          set((state) => {
+            state.retainedCompletedIds = state.retainedCompletedIds.filter(
+              (id) => !list.includes(id),
+            );
+          });
+        },
+
         cancelTodo: (ids) =>
           mutateEach(ids, (todo) => {
             if (todo.trashed) return;
             todo.status = todo.status === 'canceled' ? 'open' : 'canceled';
             todo.completedAt = todo.status === 'canceled' ? new Date().toISOString() : undefined;
+            todo.loggedAt = todo.completedAt;
           }),
 
         trashTodo: (ids) =>
@@ -1277,6 +1345,8 @@ export const useStore = create<StoreState>()(
         db: state.db,
         selectedList: state.selectedList,
         theme: state.theme,
+        completionLogging: state.completionLogging,
+        collapsedCompletedLists: state.collapsedCompletedLists,
       }),
       /** Runs only when the stored version differs from the current one. */
       migrate: (persisted, from) => {

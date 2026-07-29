@@ -1,5 +1,8 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { formatDayShort, today } from '../domain/dates';
+import { parseQuickEntry } from '../domain/quickEntry';
 import { Icon } from './Icon';
+import type { IconName } from './Icon';
 
 /**
  * The Quick Entry window: a single field that drops a to-do into the Inbox
@@ -9,6 +12,23 @@ import { Icon } from './Icon';
 export function QuickEntry() {
   const [title, setTitle] = useState('');
   const bridge = window.desktop;
+  const preview = useMemo(() => {
+    const parsed = parseQuickEntry(title);
+    const tokens: { icon: IconName; label: string }[] = [];
+    const scheduled =
+      parsed.when.kind === 'today'
+        ? today()
+        : parsed.when.kind === 'scheduled'
+          ? parsed.when.date
+          : undefined;
+    if (scheduled) tokens.push({ icon: 'calendar', label: formatDayShort(scheduled) });
+    if (parsed.deadline) {
+      tokens.push({ icon: 'flag', label: `Срок: ${formatDayShort(parsed.deadline)}` });
+    }
+    if (parsed.reminder) tokens.push({ icon: 'clock', label: parsed.reminder });
+    if (parsed.repeat) tokens.push({ icon: 'repeat', label: 'Повтор: еженедельно' });
+    return { parsed, tokens };
+  }, [title]);
 
   const submit = () => {
     const text = title.trim();
@@ -44,6 +64,23 @@ export function QuickEntry() {
             }
           }}
         />
+      </div>
+      <div className="quick__preview" aria-live="polite">
+        {preview.tokens.length > 0 ? (
+          <>
+            <span className="quick__preview-title">{preview.parsed.title}</span>
+            <span className="quick__tokens">
+              {preview.tokens.map((token) => (
+                <span className="quick__token" key={`${token.icon}:${token.label}`}>
+                  <Icon name={token.icon} size={11} />
+                  {token.label}
+                </span>
+              ))}
+            </span>
+          </>
+        ) : (
+          <span className="quick__preview-empty">Дата и время появятся здесь</span>
+        )}
       </div>
       <div className="quick__hint">
         <span>⏎ сохранить</span>

@@ -31,6 +31,9 @@ export function useKeyboard() {
       const anchor = store.selectedTodoId;
       const selection = store.selection;
       const key = event.key.toLowerCase();
+      // `event.key` follows the current layout: the physical Z key is "я" on
+      // Russian. Shortcuts must follow the key position, like native macOS apps.
+      const undoKey = key === 'z' || event.code === 'KeyZ';
 
       // The introduction is modal: nothing behind it may react to the keyboard,
       // not even Escape, which would otherwise dismiss it by accident.
@@ -58,9 +61,14 @@ export function useKeyboard() {
 
       // While the caret is in a text field these belong to the text, not to us:
       // ⌘Z undoes typing, ⌘A selects the text, ⌘⌫ deletes to the line start.
-      if (typing && mod && (key === 'z' || key === 'a' || key === 'backspace')) return;
+      if (typing && mod && (undoKey || key === 'a' || key === 'backspace')) return;
 
       if (mod && !event.shiftKey && !event.altKey) {
+        if (undoKey) {
+          event.preventDefault();
+          store.undo();
+          return;
+        }
         switch (key) {
           case 'n':
             event.preventDefault();
@@ -69,10 +77,6 @@ export function useKeyboard() {
           case 'f':
             event.preventDefault();
             store.setQuickFind(true);
-            return;
-          case 'z':
-            event.preventDefault();
-            store.undo();
             return;
           case '/':
             event.preventDefault();
@@ -140,17 +144,18 @@ export function useKeyboard() {
         }
       }
 
-      if (typing && mod && event.shiftKey && key === 'z') return;
+      if (typing && mod && event.shiftKey && undoKey) return;
 
       if (mod && event.shiftKey) {
+        if (undoKey) {
+          event.preventDefault();
+          store.redo();
+          return;
+        }
         switch (key) {
           case 'n':
             event.preventDefault();
             store.selectList(`project:${store.createProject()}`);
-            return;
-          case 'z':
-            event.preventDefault();
-            store.redo();
             return;
           case 'i':
             if (selection.length) {

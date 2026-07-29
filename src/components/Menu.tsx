@@ -8,6 +8,8 @@ export interface MenuItem {
   icon?: IconName;
   color?: string;
   hint?: string;
+  /** Opens a nested panel owned by the caller instead of dismissing the menu. */
+  keepOpen?: boolean;
   run: () => void;
 }
 
@@ -94,7 +96,7 @@ export function Menu({ at, groups, title, onClose }: MenuProps) {
                 className="popitem"
                 onClick={() => {
                   item.run();
-                  onClose();
+                  if (!item.keepOpen) onClose();
                 }}
               >
                 <span className="popitem__icon" style={{ color: item.color }}>

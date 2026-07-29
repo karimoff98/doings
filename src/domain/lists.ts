@@ -49,6 +49,17 @@ function isDone(item: { status: string; trashed: boolean }): boolean {
   return (item.status === 'completed' || item.status === 'canceled') && !item.trashed;
 }
 
+/** Completed but not logged tasks stay actionable in the manual logging mode. */
+function isWorkingTodo(todo: Todo): boolean {
+  return (
+    !todo.trashed && (todo.status === 'open' || (todo.status === 'completed' && !todo.loggedAt))
+  );
+}
+
+function isLoggedTodo(todo: Todo): boolean {
+  return isDone(todo) && (todo.status === 'canceled' || Boolean(todo.loggedAt));
+}
+
 /** A todo inherits visibility from its project: a Someday project hides its todos. */
 function projectOf(projectsById: ReadonlyMap<Id, Project>, todo: Todo): Project | undefined {
   return todo.projectId ? projectsById.get(todo.projectId) : undefined;
@@ -86,6 +97,46 @@ function todoRows(todos: Todo[]): Row[] {
   return todos.sort(byIndex).map((todo) => ({ kind: 'todo', todo }));
 }
 
+export const COMPLETED_SECTION_ID = '__completed__';
+
+/**
+ * Working lists keep freshly completed rows visible for feedback. Collect them
+ * at the bottom so they do not interrupt the remaining work and can be folded
+ * away by the view. Existing project/area completion sections are folded into
+ * the same group.
+ */
+export function separateCompletedSection(sections: Section[]): Section[] {
+  const completed: Row[] = [];
+  const active: Section[] = [];
+
+  for (const section of sections) {
+    const rows = section.rows.filter((row) => {
+      if (row.kind !== 'todo' || row.todo.status === 'open') return true;
+      completed.push(row);
+      return false;
+    });
+
+    // Project and area selectors already add a dedicated completion section.
+    // Replace it with the shared section below instead of leaving two headers.
+    if (section.id === 'done') continue;
+    active.push(rows.length === section.rows.length ? section : { ...section, rows });
+  }
+
+  if (!completed.length) return active;
+  completed.sort((a, b) => {
+    const left = a.kind === 'todo' ? (a.todo.completedAt ?? '') : '';
+    const right = b.kind === 'todo' ? (b.todo.completedAt ?? '') : '';
+    return right.localeCompare(left);
+  });
+  active.push({
+    id: COMPLETED_SECTION_ID,
+    title: 'Выполненные',
+    rows: completed,
+    muted: true,
+  });
+  return active;
+}
+
 function projectRow(db: Database, project: Project): Row {
   const todos = db.todos.filter((t) => t.projectId === project.id && !t.trashed);
   return {
@@ -105,7 +156,7 @@ function isOrphan(projectsById: ReadonlyMap<Id, Project>, todo: Todo): boolean {
 
 function inboxTodos(db: Database, projectsById: ReadonlyMap<Id, Project>): Todo[] {
   return db.todos.filter(
-    (t) => isLive(t) && !t.areaId && (!t.projectId || isOrphan(projectsById, t)),
+    (t) => isWorkingTodo(t) && !t.areaId && (!t.projectId || isOrphan(projectsById, t)),
   );
 }
 
@@ -172,7 +223,7 @@ function groupByContainer(
 
 function todayList(db: Database, projectsById: ReadonlyMap<Id, Project>): Section[] {
   const candidates = db.todos.filter((todo) => {
-    if (!isLive(todo) || blockedByProject(projectsById, todo)) return false;
+    if (!isWorkingTodo(todo) || blockedByProject(projectsById, todo)) return false;
     const start = startDay(todo);
     const startedByNow = start !== undefined && daysFromToday(start) <= 0;
     const deadlineDue = todo.deadline !== undefined && daysFromToday(todo.deadline) <= 0;
@@ -208,7 +259,7 @@ function todayList(db: Database, projectsById: ReadonlyMap<Id, Project>): Sectio
 function upcomingList(db: Database, projectsById: ReadonlyMap<Id, Project>): Section[] {
   const items = new Map<IsoDay, Todo[]>();
   for (const todo of db.todos) {
-    if (!isLive(todo) || blockedByProject(projectsById, todo)) continue;
+    if (!isWorkingTodo(todo) || blockedByProject(projectsById, todo)) continue;
     let day: IsoDay | undefined;
     if (todo.when.kind === 'scheduled' && todo.when.date && daysFromToday(todo.when.date) > 0) {
       day = todo.when.date;
@@ -239,14 +290,14 @@ function upcomingList(db: Database, projectsById: ReadonlyMap<Id, Project>): Sec
 
 function anytimeList(db: Database, projectsById: ReadonlyMap<Id, Project>): Section[] {
   const todos = db.todos.filter(
-    (todo) => isLive(todo) && !blockedByProject(projectsById, todo) && isActionableNow(todo),
+    (todo) => isWorkingTodo(todo) && !blockedByProject(projectsById, todo) && isActionableNow(todo),
   );
   return groupByContainer(db, todos, projectsById);
 }
 
 function somedayList(db: Database, projectsById: ReadonlyMap<Id, Project>): Section[] {
   const todos = db.todos.filter((todo) => {
-    if (!isLive(todo)) return false;
+    if (!isWorkingTodo(todo)) return false;
     if (todo.when.kind === 'someday') return true;
     const project = projectOf(projectsById, todo);
     return project?.status === 'open' && !project.trashed && project.when.kind === 'someday';
@@ -256,7 +307,7 @@ function somedayList(db: Database, projectsById: ReadonlyMap<Id, Project>): Sect
 
 function importantList(db: Database, projectsById: ReadonlyMap<Id, Project>): Section[] {
   const todos = db.todos.filter(
-    (todo) => isLive(todo) && todo.important && !blockedByProject(projectsById, todo),
+    (todo) => isWorkingTodo(todo) && todo.important && !blockedByProject(projectsById, todo),
   );
   return groupByContainer(db, todos, projectsById);
 }
@@ -272,8 +323,8 @@ function logbookList(db: Database): Section[] {
     byDay.set(day, list);
   };
 
-  for (const todo of db.todos.filter(isDone)) {
-    add(todo.completedAt ?? todo.createdAt, { kind: 'todo', todo });
+  for (const todo of db.todos.filter(isLoggedTodo)) {
+    add(todo.loggedAt ?? todo.completedAt ?? todo.createdAt, { kind: 'todo', todo });
   }
   for (const project of db.projects.filter(isDone)) {
     add(project.completedAt ?? project.createdAt, projectRow(db, project));
@@ -311,8 +362,8 @@ function trashList(db: Database): Section[] {
 
 function projectList(db: Database, projectId: Id): Section[] {
   const all = db.todos.filter((t) => t.projectId === projectId && !t.trashed);
-  const open = all.filter((t) => t.status === 'open');
-  const done = all.filter((t) => t.status !== 'open');
+  const open = all.filter(isWorkingTodo);
+  const done = all.filter((todo) => !isWorkingTodo(todo));
   const headings = db.headings.filter((h) => h.projectId === projectId).sort(byIndex);
 
   const sections: Section[] = [];
@@ -347,7 +398,7 @@ function projectList(db: Database, projectId: Id): Section[] {
 
 function areaList(db: Database, areaId: Id): Section[] {
   const sections: Section[] = [];
-  const loose = db.todos.filter((t) => t.areaId === areaId && !t.projectId && isLive(t));
+  const loose = db.todos.filter((t) => t.areaId === areaId && !t.projectId && isWorkingTodo(t));
   sections.push({
     id: 'root',
     rows: todoRows(loose),
@@ -365,7 +416,7 @@ function areaList(db: Database, areaId: Id): Section[] {
   }
 
   // Without this, a completed todo of an area is unreachable from the area view.
-  const done = db.todos.filter((t) => t.areaId === areaId && !t.projectId && isDone(t));
+  const done = db.todos.filter((t) => t.areaId === areaId && !t.projectId && isLoggedTodo(t));
   if (done.length) {
     sections.push({
       id: 'done',
@@ -380,7 +431,7 @@ function areaList(db: Database, areaId: Id): Section[] {
 }
 
 function tagList(db: Database, tagId: Id, projectsById: ReadonlyMap<Id, Project>): Section[] {
-  const todos = db.todos.filter((t) => isLive(t) && t.tagIds.includes(tagId));
+  const todos = db.todos.filter((t) => isWorkingTodo(t) && t.tagIds.includes(tagId));
   return groupByContainer(db, todos, projectsById);
 }
 
@@ -460,12 +511,23 @@ export function selectSectionsKeepingCompleted(
 export function listCount(db: Database, key: ListKey): number {
   const list = parseListKey(key);
   const projectsById = new Map(db.projects.map((project) => [project.id, project]));
-  if (list.kind === 'inbox') return inboxTodos(db, projectsById).length;
+  if (list.kind === 'inbox')
+    return inboxTodos(db, projectsById).filter((todo) => todo.status === 'open').length;
   if (list.kind === 'today') {
-    return todayList(db, projectsById).reduce((sum, section) => sum + section.rows.length, 0);
+    return todayList(db, projectsById).reduce(
+      (sum, section) =>
+        sum +
+        section.rows.filter((row) => row.kind === 'todo' && row.todo.status === 'open').length,
+      0,
+    );
   }
   if (list.kind === 'important') {
-    return importantList(db, projectsById).reduce((sum, section) => sum + section.rows.length, 0);
+    return importantList(db, projectsById).reduce(
+      (sum, section) =>
+        sum +
+        section.rows.filter((row) => row.kind === 'todo' && row.todo.status === 'open').length,
+      0,
+    );
   }
   if (list.kind === 'project') {
     return db.todos.filter((t) => t.projectId === list.id && t.status === 'open' && !t.trashed)

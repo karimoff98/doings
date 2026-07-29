@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { quickEntryLabel, shortcutLabel } from '../domain/platform';
 import { useStore } from '../store/store';
-import type { Theme } from '../store/store';
+import type { CompletionLogging, Theme } from '../store/store';
 import { exportDatabase, pickDatabase } from '../store/backup';
 import {
   backupsAvailable,
@@ -23,6 +23,12 @@ const THEMES: { value: Theme; label: string }[] = [
   { value: 'dark', label: 'Тёмная' },
 ];
 
+const COMPLETION_LOGGING: { value: CompletionLogging; label: string }[] = [
+  { value: 'immediately', label: 'Сразу' },
+  { value: 'on-list-change', label: 'При переходе' },
+  { value: 'manual', label: 'Вручную' },
+];
+
 /** Turns a raw process arch into something a person recognises. */
 function archLabel(arch: string): string {
   if (arch === 'arm64') return 'Apple Silicon (arm64)';
@@ -35,6 +41,8 @@ export function SettingsDialog() {
   const setSettings = useStore((s) => s.setSettings);
   const theme = useStore((s) => s.theme);
   const setTheme = useStore((s) => s.setTheme);
+  const completionLogging = useStore((s) => s.completionLogging);
+  const setCompletionLogging = useStore((s) => s.setCompletionLogging);
   const db = useStore((s) => s.db);
   const importDatabase = useStore((s) => s.importDatabase);
   const resetToEmpty = useStore((s) => s.resetToEmpty);
@@ -95,6 +103,29 @@ export function SettingsDialog() {
                   aria-checked={theme === option.value}
                   className={`segmented__item${theme === option.value ? ' segmented__item--on' : ''}`}
                   onClick={() => setTheme(option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="settings__row">
+            <div>
+              <div className="settings__label">Выполненные задачи</div>
+              <div className="settings__hint">Когда переносить отмеченные задачи в Журнал</div>
+            </div>
+            <div className="segmented" role="radiogroup" aria-label="Перенос выполненных задач">
+              {COMPLETION_LOGGING.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={completionLogging === option.value}
+                  className={`segmented__item${
+                    completionLogging === option.value ? ' segmented__item--on' : ''
+                  }`}
+                  onClick={() => setCompletionLogging(option.value)}
                 >
                   {option.label}
                 </button>
