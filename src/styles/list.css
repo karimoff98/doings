@@ -254,6 +254,12 @@
   border-radius: var(--radius-row);
   text-align: left;
   cursor: default;
+  /*
+   * Large lists no longer spend layout and paint time on rows far outside the
+   * viewport. The remembered height also prevents the scrollbar from jumping.
+   */
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto 29px;
   transition: background var(--dur-fast) linear;
 }
 
@@ -268,6 +274,12 @@
 
 .row--muted .row__title {
   color: var(--text-secondary);
+}
+
+.row--completed .row__title {
+  color: var(--text-secondary);
+  text-decoration: line-through;
+  text-decoration-color: var(--text-tertiary);
 }
 
 .row--canceled .row__title {

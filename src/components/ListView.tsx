@@ -8,7 +8,7 @@ import {
   projectProgress,
   projectStats,
   projectTitle,
-  selectSections,
+  selectSectionsKeepingCompleted,
 } from '../domain/lists';
 import { parseListKey } from '../domain/types';
 import type { Database, Id, ItemStatus, Section, Tag } from '../domain/types';
@@ -112,6 +112,7 @@ export function ListView() {
   const db = useStore((s) => s.db);
   const selectedList = useStore((s) => s.selectedList);
   const selection = useStore((s) => s.selection);
+  const retainedCompletedIds = useStore((s) => s.retainedCompletedIds);
   const selectedTodoId = useStore((s) => s.selectedTodoId);
   const selectionAnchor = useStore((s) => s.selectionAnchor);
   const editingTodoId = useStore((s) => s.editingTodoId);
@@ -154,8 +155,8 @@ export function ListView() {
   // Deriving the sections walks the whole database, so it must not run on every
   // click or drag — only when the data or the chosen list actually changes.
   const allSections = useMemo<Section[]>(
-    () => selectSections(db, selectedList),
-    [db, selectedList],
+    () => selectSectionsKeepingCompleted(db, selectedList, retainedCompletedIds),
+    [db, selectedList, retainedCompletedIds],
   );
   const availableTags = useMemo(() => tagsInSections(db, allSections), [db, allSections]);
   const activeFilter = useMemo(

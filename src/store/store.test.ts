@@ -16,6 +16,7 @@ function reset() {
   useStore.setState({
     selectedList: 'today',
     selection: [],
+    retainedCompletedIds: [],
     selectedTodoId: undefined,
     selectionAnchor: undefined,
     editingTodoId: undefined,
@@ -97,6 +98,28 @@ describe('пакетные действия и отмена', () => {
     store().createTodo({ title: 'Следующая' });
 
     expect(store().db.todos.some((item) => item.id === oldId)).toBe(true);
+  });
+
+  it('держит выполненную задачу до перехода в другой список', () => {
+    const id = store().createTodo({ title: 'Останусь', when: { kind: 'today' } });
+    store().selectList('today');
+
+    store().completeTodo(id);
+    expect(store().retainedCompletedIds).toContain(id);
+
+    store().selectList('anytime');
+    expect(store().retainedCompletedIds).toEqual([]);
+  });
+
+  it('повторный клик возвращает удержанную задачу в работу', () => {
+    const id = store().createTodo({ title: 'Передумал', when: { kind: 'today' } });
+    store().selectList('today');
+    store().completeTodo(id);
+
+    store().uncompleteTodo(id);
+
+    expect(store().db.todos.find((todo) => todo.id === id)?.status).toBe('open');
+    expect(store().retainedCompletedIds).not.toContain(id);
   });
 });
 

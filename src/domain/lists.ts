@@ -421,6 +421,41 @@ export function selectSections(db: Database, key: ListKey): Section[] {
   }
 }
 
+/**
+ * A completed todo normally leaves its working list immediately. For the ids
+ * completed during the current visit, derive the list as if they were still
+ * open, then put their real completed state back into the rows. This keeps the
+ * checkbox feedback visible without lying in the persisted database.
+ */
+export function selectSectionsKeepingCompleted(
+  db: Database,
+  key: ListKey,
+  retainedIds: readonly Id[],
+): Section[] {
+  if (!retainedIds.length) return selectSections(db, key);
+
+  const retained = new Set(retainedIds);
+  const actual = new Map<Id, Todo>();
+  const previewTodos: Todo[] = [];
+  for (const todo of db.todos) {
+    if (retained.has(todo.id) && todo.status === 'completed' && !todo.trashed) {
+      actual.set(todo.id, todo);
+      previewTodos.push({ ...todo, status: 'open', completedAt: undefined });
+    } else {
+      previewTodos.push(todo);
+    }
+  }
+  if (!actual.size) return selectSections(db, key);
+
+  const sections = selectSections({ ...db, todos: previewTodos }, key);
+  for (const section of sections) {
+    for (const row of section.rows) {
+      if (row.kind === 'todo') row.todo = actual.get(row.todo.id) ?? row.todo;
+    }
+  }
+  return sections;
+}
+
 /** Badge numbers in the sidebar. Things only counts Inbox and Today. */
 export function listCount(db: Database, key: ListKey): number {
   const list = parseListKey(key);

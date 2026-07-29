@@ -46,10 +46,15 @@ function useHydrated(): HydrationState {
 
   useEffect(() => {
     if (hydrated) return;
-    const stop = useStore.persist.onFinishHydration(() => {
+    const finish = () => {
       setHydrated(true);
       setTimedOut(false);
-    });
+    };
+    const stop = useStore.persist.onFinishHydration(finish);
+    // Hydration may finish between the initial render and this effect. In that
+    // case the event above has already fired, so read the current state once
+    // after subscribing instead of leaving the app on the timeout screen.
+    if (useStore.persist.hasHydrated()) finish();
     // Never expose an editable empty database while the real file may still
     // arrive and replace it. A stalled read gets a safe retry screen instead.
     const timer = window.setTimeout(() => setTimedOut(true), HYDRATION_TIMEOUT_MS);

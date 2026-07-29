@@ -70,6 +70,58 @@ afterEach(() => {
   delete (window as unknown as { desktop?: unknown }).desktop;
 });
 
+describe('быстрые непостоянные действия', () => {
+  it('не сериализует базу повторно, если сохранённая часть состояния не изменилась', async () => {
+    const { skipUnchangedWrites } = await loadModule();
+    const setItem = vi.fn();
+    const storage = skipUnchangedWrites(
+      {
+        getItem: () => null,
+        setItem,
+        removeItem: vi.fn(),
+      },
+      (
+        previous: { db: object; selectedList: string; theme: string },
+        next: { db: object; selectedList: string; theme: string },
+      ) =>
+        previous.db === next.db &&
+        previous.selectedList === next.selectedList &&
+        previous.theme === next.theme,
+    );
+    const db = {};
+    const state = { db, selectedList: 'today', theme: 'system' };
+
+    storage.setItem('doings.v1', { state, version: 2 });
+    storage.setItem('doings.v1', { state: { ...state }, version: 2 });
+    storage.setItem('doings.v1', {
+      state: { ...state, selectedList: 'anytime' },
+      version: 2,
+    });
+
+    expect(setItem).toHaveBeenCalledTimes(2);
+  });
+
+  it('не считает неудачную запись сохранённой', async () => {
+    const { skipUnchangedWrites } = await loadModule();
+    const setItem = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new Error('нет места');
+      })
+      .mockImplementationOnce(() => undefined);
+    const storage = skipUnchangedWrites(
+      { getItem: () => null, setItem, removeItem: vi.fn() },
+      (previous: object, next: object) => previous === next,
+    );
+    const state = {};
+
+    expect(() => storage.setItem('doings.v1', { state })).toThrow('нет места');
+    storage.setItem('doings.v1', { state });
+
+    expect(setItem).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('файловое хранилище', () => {
   it('читает нормальный файл как есть', async () => {
     const payload = JSON.stringify({ state: { db: { todos: [] } }, version: 1 });

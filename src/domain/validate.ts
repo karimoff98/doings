@@ -17,7 +17,7 @@ import type {
  * Bumped whenever the stored shape changes in a way that needs conversion.
  * Every migration step lives in MIGRATIONS below.
  */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export interface ValidationResult {
   db: Database;
@@ -311,6 +311,10 @@ const MIGRATIONS: Record<number, Migration> = {
       trashed: project.trashed ?? false,
     })),
   }),
+  // Version 2 was briefly used by a development build. Keep the number
+  // reserved so databases opened by it remain readable after the feature was
+  // removed; normal validation drops its unused fields.
+  2: (db) => db,
 };
 
 export function migrateDatabase(

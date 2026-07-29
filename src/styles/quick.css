@@ -46,3 +46,14 @@
   font-size: 11px;
   color: var(--text-tertiary);
 }
+
+/* Loaded last, so this also overrides animations declared by component styles. */
+@media (prefers-reduced-motion: reduce) {
+  .editor,
+  .popover,
+  .contextmenu,
+  .dialog,
+  .dialog__scrim {
+    animation: none;
+  }
+}

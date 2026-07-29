@@ -82,6 +82,7 @@ export function TaskRow({
         dragging && 'row--dragging',
         dropEdge === 'top' && 'row--drop-top',
         dropEdge === 'bottom' && 'row--drop-bottom',
+        todo.status === 'completed' && 'row--completed',
         todo.status === 'canceled' && 'row--canceled',
       ]
         .filter(Boolean)

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { shiftDay, today } from './dates';
-import { listCount, projectStats, selectSections } from './lists';
+import { listCount, projectStats, selectSections, selectSectionsKeepingCompleted } from './lists';
 import type { Database, ListKey, Project, Section, Todo } from './types';
 
 function todo(overrides: Partial<Todo> & { id: string }): Todo {
@@ -119,6 +119,25 @@ describe('Сегодня', () => {
 
   it('счётчик в сайдбаре совпадает с числом строк', () => {
     expect(listCount(db, 'today')).toBe(4);
+  });
+
+  it('временно оставляет только что выполненную задачу на прежнем месте', () => {
+    const completed = database({
+      todos: [
+        todo({
+          id: 'готово',
+          when: { kind: 'today' },
+          status: 'completed',
+          completedAt: '2026-07-29T12:00:00.000Z',
+        }),
+      ],
+    });
+
+    const sections = selectSectionsKeepingCompleted(completed, 'today', ['готово']);
+    const row = sections.flatMap((section) => section.rows)[0];
+
+    expect(row?.kind).toBe('todo');
+    if (row?.kind === 'todo') expect(row.todo.status).toBe('completed');
   });
 });
 

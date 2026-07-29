@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import type { PersistStorage } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import { tomorrow } from '../domain/dates';
 import { selectSections } from '../domain/lists';
@@ -21,7 +22,13 @@ import type {
   When,
 } from '../domain/types';
 import { requestMigrationBackup } from './backups';
-import { appStorage, blockWrites, drainStorageErrors, setStorageErrorHandler } from './persistence';
+import {
+  appStorage,
+  blockWrites,
+  drainStorageErrors,
+  setStorageErrorHandler,
+  skipUnchangedWrites,
+} from './persistence';
 import { createDemoDatabase, createEmptyDatabase, newId } from './seed';
 
 export type Theme = 'system' | 'light' | 'dark';
@@ -41,6 +48,11 @@ export interface StoreState {
   selectionAnchor?: Id;
   /** Everything currently selected; single click leaves exactly one id here. */
   selection: Id[];
+  /**
+   * Completed during the current visit. They remain visible and reversible
+   * until the user opens another list; session-only and never persisted.
+   */
+  retainedCompletedIds: Id[];
   editingTodoId?: Id;
   /** Set right after creation so the title field can grab focus. */
   freshTodoId?: Id;
@@ -337,6 +349,21 @@ function exposeForDebug(store: unknown) {
   }
 }
 
+type PersistedState = Partial<StoreState>;
+
+const storeStorage = appStorage
+  ? skipUnchangedWrites<PersistedState>(
+      appStorage as PersistStorage<PersistedState>,
+      (previous, next) => {
+        return (
+          previous.db === next.db &&
+          previous.selectedList === next.selectedList &&
+          previous.theme === next.theme
+        );
+      },
+    )
+  : undefined;
+
 export const useStore = create<StoreState>()(
   persist(
     immer((set, get) => {
@@ -404,6 +431,7 @@ export const useStore = create<StoreState>()(
           state.selectedTodoId = undefined;
           state.selectionAnchor = undefined;
           state.selection = [];
+          state.retainedCompletedIds = [];
           state.editingTodoId = undefined;
           state.freshTodoId = undefined;
           state.draftProjectId = undefined;
@@ -485,6 +513,7 @@ export const useStore = create<StoreState>()(
         selectedTodoId: undefined,
         selectionAnchor: undefined,
         selection: [],
+        retainedCompletedIds: [],
         editingTodoId: undefined,
         freshTodoId: undefined,
         autoPanel: undefined,
@@ -533,7 +562,9 @@ export const useStore = create<StoreState>()(
               }
               state.draftAreaId = undefined;
             }
-            state.selectedList = validList(state.db, key);
+            const nextList = validList(state.db, key);
+            if (nextList !== state.selectedList) state.retainedCompletedIds = [];
+            state.selectedList = nextList;
             state.selectedTodoId = undefined;
             state.selectionAnchor = undefined;
             state.selection = [];
@@ -785,8 +816,14 @@ export const useStore = create<StoreState>()(
             }
           }),
 
-        completeTodo: (ids) =>
-          mutateEach(ids, (todo, db) => {
+        completeTodo: (ids) => {
+          const list = Array.isArray(ids) ? ids : [ids];
+          const visible = new Set(
+            selectSections(get().db, get().selectedList).flatMap((section) =>
+              section.rows.flatMap((row) => (row.kind === 'todo' ? [row.todo.id] : [])),
+            ),
+          );
+          mutateEach(list, (todo, db) => {
             // Trashed items cannot be worked on, and completing an already
             // completed todo would spawn a second copy of a repeating one.
             if (todo.trashed || todo.status !== 'open') return;
@@ -794,10 +831,24 @@ export const useStore = create<StoreState>()(
             todo.completedAt = new Date().toISOString();
             const spawned = nextRepeatCopy(todo, newId);
             if (spawned) db.todos.push(spawned);
-          }),
+          });
+          set((state) => {
+            for (const id of list) {
+              const todo = state.db.todos.find((item) => item.id === id);
+              if (
+                visible.has(id) &&
+                todo?.status === 'completed' &&
+                !state.retainedCompletedIds.includes(id)
+              ) {
+                state.retainedCompletedIds.push(id);
+              }
+            }
+          });
+        },
 
-        uncompleteTodo: (ids) =>
-          mutateEach(ids, (todo, db) => {
+        uncompleteTodo: (ids) => {
+          const list = Array.isArray(ids) ? ids : [ids];
+          mutateEach(list, (todo, db) => {
             if (todo.trashed) return;
             todo.status = 'open';
             todo.completedAt = undefined;
@@ -812,7 +863,13 @@ export const useStore = create<StoreState>()(
                 (other.seriesId ?? other.id) !== series ||
                 other.createdAt <= todo.createdAt,
             );
-          }),
+          });
+          set((state) => {
+            state.retainedCompletedIds = state.retainedCompletedIds.filter(
+              (id) => !list.includes(id),
+            );
+          });
+        },
 
         cancelTodo: (ids) =>
           mutateEach(ids, (todo) => {
@@ -845,6 +902,7 @@ export const useStore = create<StoreState>()(
           });
           set((state) => {
             state.selection = [];
+            state.retainedCompletedIds = [];
             state.selectedTodoId = undefined;
             state.selectionAnchor = undefined;
             state.editingTodoId = undefined;
@@ -1196,6 +1254,7 @@ export const useStore = create<StoreState>()(
             // The list that was open may not exist in the imported data.
             state.selectedList = validList(state.db, state.selectedList);
             state.selection = [];
+            state.retainedCompletedIds = [];
             state.selectedTodoId = undefined;
             state.selectionAnchor = undefined;
             state.editingTodoId = undefined;
@@ -1213,7 +1272,7 @@ export const useStore = create<StoreState>()(
       // still reads the old key once and moves the data over.
       name: 'doings.v1',
       version: SCHEMA_VERSION,
-      storage: appStorage,
+      storage: storeStorage,
       partialize: (state) => ({
         db: state.db,
         selectedList: state.selectedList,

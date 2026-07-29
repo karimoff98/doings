@@ -1,5 +1,5 @@
 import { createJSONStorage } from 'zustand/middleware';
-import type { StateStorage } from 'zustand/middleware';
+import type { PersistStorage, StateStorage, StorageValue } from 'zustand/middleware';
 import { commitPendingEdits } from './pendingEdits';
 import { reportSaveStatus } from './saveStatus';
 
@@ -232,6 +232,39 @@ export function markOnboardingComplete(): void {
   } catch {
     // Nothing to do: the worst case is showing the introduction once more.
   }
+}
+
+/**
+ * Zustand calls persistence after every store update, including opening a menu
+ * or moving the selection. Those updates keep the persisted slice by reference,
+ * so avoid serialising the entire database when nothing saved has changed.
+ */
+export function skipUnchangedWrites<S>(
+  storage: PersistStorage<S>,
+  equal: (previous: S, next: S) => boolean,
+): PersistStorage<S> {
+  const last = new Map<string, StorageValue<S>>();
+  return {
+    getItem: (name) => storage.getItem(name),
+    setItem: (name, value) => {
+      const previous = last.get(name);
+      if (previous && previous.version === value.version && equal(previous.state, value.state)) {
+        return;
+      }
+      last.set(name, value);
+      try {
+        return storage.setItem(name, value);
+      } catch (error) {
+        if (previous) last.set(name, previous);
+        else last.delete(name);
+        throw error;
+      }
+    },
+    removeItem: (name) => {
+      last.delete(name);
+      return storage.removeItem(name);
+    },
+  };
 }
 
 /**
