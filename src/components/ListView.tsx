@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { DragEvent, MouseEvent } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { DragEvent } from 'react';
 import { formatDayLong, formatDayShort, formatWeekday, tomorrow } from '../domain/dates';
 import { shortcutLabel } from '../domain/platform';
 import {
@@ -13,7 +13,7 @@ import {
   separateCompletedSection,
 } from '../domain/lists';
 import { parseListKey } from '../domain/types';
-import type { Database, Id, ItemStatus, Section, Tag } from '../domain/types';
+import type { Area, Database, Id, ItemStatus, Project, Section, Tag, Todo } from '../domain/types';
 import { useStore } from '../store/store';
 import { BulkBar } from './BulkBar';
 import { AutoTextarea } from './AutoTextarea';
@@ -85,6 +85,9 @@ interface DropState {
   edge: DropEdge;
 }
 
+/** Scroll belongs to a list, not to the shared content pane. */
+const scrollByList = new Map<string, number>();
+
 /** Tags worn by the todos of a list, in the order tags were created. */
 function tagsInSections(db: Database, sections: Section[]): Tag[] {
   const used = new Set<Id>();
@@ -110,6 +113,139 @@ function applyTagFilter(sections: Section[], tagFilter: Id[]): Section[] {
     .filter((section) => section.rows.length > 0);
 }
 
+/** Keeps the same array reference while list membership and order stay equal. */
+function useStableIds(ids: Id[]): Id[] {
+  const stable = useRef(ids);
+  if (
+    stable.current.length !== ids.length ||
+    stable.current.some((id, index) => id !== ids[index])
+  ) {
+    stable.current = ids;
+  }
+  return stable.current;
+}
+
+interface ListTaskRowProps {
+  todo: Todo;
+  projectsById: ReadonlyMap<Id, Project>;
+  areasById: ReadonlyMap<Id, Area>;
+  tagsById: ReadonlyMap<Id, Tag>;
+  visibleIds: Id[];
+  sectionId: string;
+  reorderable: boolean;
+  muted?: boolean;
+  showContainer: boolean;
+  showWhen: boolean;
+  dropEdge?: DropEdge;
+  onOpenMenu: (at: MenuPosition) => void;
+  onAllowDrop: (event: DragEvent, next: DropState) => void;
+  onCommitDrop: (sectionId: string, targetId: Id, edge: DropEdge) => void;
+  onFinishDrag: () => void;
+}
+
+/**
+ * A selection change used to render every task in a long list because all row
+ * handlers were recreated inside ListView. This memoized boundary subscribes
+ * only to the two booleans that can visually change for its own task. Event
+ * handlers read the latest store state at click time, so they stay correct
+ * without making every sibling render.
+ */
+const ListTaskRow = memo(function ListTaskRow({
+  todo,
+  projectsById,
+  areasById,
+  tagsById,
+  visibleIds,
+  sectionId,
+  reorderable,
+  muted,
+  showContainer,
+  showWhen,
+  dropEdge,
+  onOpenMenu,
+  onAllowDrop,
+  onCommitDrop,
+  onFinishDrag,
+}: ListTaskRowProps) {
+  const selected = useStore((state) => state.selection.includes(todo.id));
+  const dragging = useStore((state) => state.draggingIds.includes(todo.id));
+  const editing = useStore((state) => state.editingTodoId === todo.id);
+
+  if (editing) return <TaskEditor todo={todo} />;
+
+  return (
+    <TaskRow
+      todo={todo}
+      projectsById={projectsById}
+      areasById={areasById}
+      tagsById={tagsById}
+      selected={selected}
+      draggable={reorderable && todo.status === 'open'}
+      dragging={dragging}
+      dropEdge={dropEdge}
+      muted={muted}
+      showWhen={showWhen}
+      showContainer={showContainer}
+      onClick={(event) => {
+        const state = useStore.getState();
+        if (event.metaKey || event.ctrlKey) {
+          state.toggleSelection(todo.id);
+          return;
+        }
+        if (event.shiftKey) {
+          const anchor = state.selectionAnchor ?? state.selectedTodoId;
+          const from = anchor ? visibleIds.indexOf(anchor) : -1;
+          const to = visibleIds.indexOf(todo.id);
+          if (from !== -1 && to !== -1) {
+            const [start, end] = from < to ? [from, to] : [to, from];
+            state.selectRange(visibleIds.slice(start, end + 1), todo.id, true);
+            return;
+          }
+        }
+        if (state.selection.length === 1 && state.selection[0] === todo.id) {
+          state.openEditor(todo.id);
+        } else {
+          state.selectTodo(todo.id);
+        }
+      }}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        const state = useStore.getState();
+        if (!state.selection.includes(todo.id)) state.selectTodo(todo.id);
+        onOpenMenu({ x: event.clientX, y: event.clientY });
+      }}
+      onTagClick={(tagId) => useStore.getState().selectList(`tag:${tagId}`)}
+      onOpen={() => useStore.getState().openEditor(todo.id)}
+      onToggle={() => {
+        const state = useStore.getState();
+        if (todo.trashed) state.restoreTodo(todo.id);
+        else if (todo.status === 'open') state.completeTodo(todo.id);
+        else state.uncompleteTodo(todo.id);
+      }}
+      onDragStart={(event) => {
+        const state = useStore.getState();
+        const ids = state.selection.includes(todo.id) ? state.selection : [todo.id];
+        if (!state.selection.includes(todo.id)) state.selectTodo(todo.id);
+        state.setDragging(ids);
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', ids.join(','));
+      }}
+      onDragOver={(event, edge) => {
+        if (!reorderable) return;
+        event.stopPropagation();
+        onAllowDrop(event, { sectionId, targetId: todo.id, edge });
+      }}
+      onDrop={(event, edge) => {
+        if (!reorderable) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onCommitDrop(sectionId, todo.id, edge);
+      }}
+      onDragEnd={onFinishDrag}
+    />
+  );
+});
+
 export function ListView() {
   const db = useStore((s) => s.db);
   const selectedList = useStore((s) => s.selectedList);
@@ -118,23 +254,13 @@ export function ListView() {
   const completionLogging = useStore((s) => s.completionLogging);
   const collapsedCompletedLists = useStore((s) => s.collapsedCompletedLists ?? []);
   const toggleCompletedSection = useStore((s) => s.toggleCompletedSection);
-  const selectedTodoId = useStore((s) => s.selectedTodoId);
-  const selectionAnchor = useStore((s) => s.selectionAnchor);
-  const editingTodoId = useStore((s) => s.editingTodoId);
   const draggingIds = useStore((s) => s.draggingIds);
-  const selectTodo = useStore((s) => s.selectTodo);
   const selectList = useStore((s) => s.selectList);
-  const toggleSelection = useStore((s) => s.toggleSelection);
-  const selectRange = useStore((s) => s.selectRange);
-  const openEditor = useStore((s) => s.openEditor);
-  const completeTodo = useStore((s) => s.completeTodo);
-  const uncompleteTodo = useStore((s) => s.uncompleteTodo);
   const logCompleted = useStore((s) => s.logCompleted);
   const restoreTodo = useStore((s) => s.restoreTodo);
   const createTodo = useStore((s) => s.createTodo);
   const emptyTrash = useStore((s) => s.emptyTrash);
   const dropTodos = useStore((s) => s.dropTodos);
-  const setDragging = useStore((s) => s.setDragging);
   const endDrag = useStore((s) => s.endDrag);
   const tagFilter = useStore((s) => s.tagFilter);
   const toggleTagFilter = useStore((s) => s.toggleTagFilter);
@@ -147,6 +273,17 @@ export function ListView() {
   const [tagMenu, setTagMenu] = useState<{ at: MenuPosition; tag: Tag } | null>(null);
   const [upcomingView, setUpcomingView] = useState<'list' | 'month'>('list');
   const [calendarDay, setCalendarDay] = useState(() => tomorrow());
+  const content = useRef<HTMLElement>(null);
+  const sectionsRef = useRef<Section[]>([]);
+
+  useLayoutEffect(() => {
+    const node = content.current;
+    if (!node) return;
+    node.scrollTop = scrollByList.get(selectedList) ?? 0;
+    return () => {
+      scrollByList.set(selectedList, node.scrollTop);
+    };
+  }, [selectedList]);
 
   const list = parseListKey(selectedList);
   const projectsById = useMemo(
@@ -156,8 +293,6 @@ export function ListView() {
   const areasById = useMemo(() => new Map(db.areas.map((area) => [area.id, area])), [db.areas]);
   const tagsById = useMemo(() => new Map(db.tags.map((tag) => [tag.id, tag])), [db.tags]);
   const statsByProject = useMemo(() => projectStats(db), [db]);
-  const selectedIds = useMemo(() => new Set(selection), [selection]);
-  const draggedIds = useMemo(() => new Set(draggingIds), [draggingIds]);
   // Deriving the sections walks the whole database, so it must not run on every
   // click or drag — only when the data or the chosen list actually changes.
   const allSections = useMemo<Section[]>(
@@ -197,16 +332,18 @@ export function ListView() {
         : visibleSections,
     [completedCollapsed, visibleSections],
   );
+  sectionsRef.current = renderedSections;
   const options = rowOptions(list.kind);
   const hasRows = sections.some((section) => section.rows.length > 0);
   const selectedDayHasRows = visibleSections.some((section) => section.rows.length > 0);
-  const visibleIds = useMemo(
+  const nextVisibleIds = useMemo(
     () =>
       renderedSections.flatMap((section) =>
         section.rows.flatMap((row) => (row.kind === 'todo' ? [row.todo.id] : [])),
       ),
     [renderedSections],
   );
+  const visibleIds = useStableIds(nextVisibleIds);
   const waitingForLogIds = useMemo(
     () =>
       visibleSections.flatMap((section) =>
@@ -219,76 +356,60 @@ export function ListView() {
     [visibleSections],
   );
 
-  const handleClick = (id: Id, event: MouseEvent) => {
-    if (event.metaKey || event.ctrlKey) {
-      toggleSelection(id);
-      return;
-    }
-    if (event.shiftKey) {
-      const anchor = selectionAnchor ?? selectedTodoId;
-      const from = anchor ? visibleIds.indexOf(anchor) : -1;
-      const to = visibleIds.indexOf(id);
-      if (from !== -1 && to !== -1) {
-        const [start, end] = from < to ? [from, to] : [to, from];
-        // Merge, so rows picked earlier with ⌘-click survive.
-        selectRange(visibleIds.slice(start, end + 1), id, true);
-        return;
-      }
-    }
-    if (selection.length === 1 && selection[0] === id) openEditor(id);
-    else selectTodo(id);
-  };
-
-  const beginDrag = (id: Id, event: DragEvent) => {
-    const ids = selectedIds.has(id) ? selection : [id];
-    if (!selectedIds.has(id)) selectTodo(id);
-    setDragging(ids);
-    event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setData('text/plain', ids.join(','));
-  };
-
-  const allowDrop = (event: DragEvent, next: DropState) => {
-    if (!draggingIds.length) return;
+  const allowDrop = useCallback((event: DragEvent, next: DropState) => {
+    if (!useStore.getState().draggingIds.length) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
-    if (
-      drop?.sectionId !== next.sectionId ||
-      drop?.targetId !== next.targetId ||
-      drop?.edge !== next.edge
-    ) {
-      setDrop(next);
-    }
-  };
+    setDrop((current) =>
+      current?.sectionId === next.sectionId &&
+      current.targetId === next.targetId &&
+      current.edge === next.edge
+        ? current
+        : next,
+    );
+  }, []);
 
   /** Applies a drop: re-home, re-schedule and reorder in one step. */
-  const commitDrop = (section: Section, targetId: Id | undefined, edge: DropEdge) => {
-    const ids = draggingIds;
+  const commitDrop = useCallback(
+    (sectionId: string, targetId: Id | undefined, edge: DropEdge) => {
+      const section = sectionsRef.current.find((item) => item.id === sectionId);
+      const ids = useStore.getState().draggingIds;
+      setDrop(null);
+      endDrag();
+      if (!section || !ids.length) return;
+
+      const sectionIds = section.rows.flatMap((row) => (row.kind === 'todo' ? [row.todo.id] : []));
+      const moved = new Set(ids);
+      const kept = sectionIds.filter((id) => !moved.has(id));
+      let position = kept.length;
+      if (targetId && !moved.has(targetId)) {
+        const at = kept.indexOf(targetId);
+        if (at !== -1) position = edge === 'top' ? at : at + 1;
+      }
+      const order = [...kept.slice(0, position), ...ids, ...kept.slice(position)];
+
+      dropTodos(ids, {
+        container: section.container,
+        when: section.when,
+        order,
+      });
+    },
+    [dropTodos, endDrag],
+  );
+
+  const finishDrag = useCallback(() => {
     setDrop(null);
     endDrag();
-    if (!ids.length) return;
+  }, [endDrag]);
 
-    const sectionIds = section.rows.flatMap((row) => (row.kind === 'todo' ? [row.todo.id] : []));
-    const moved = new Set(ids);
-    const kept = sectionIds.filter((id) => !moved.has(id));
-    let position = kept.length;
-    if (targetId && !moved.has(targetId)) {
-      const at = kept.indexOf(targetId);
-      if (at !== -1) position = edge === 'top' ? at : at + 1;
-    }
-    const order = [...kept.slice(0, position), ...ids, ...kept.slice(position)];
-
-    dropTodos(ids, {
-      container: section.container,
-      when: section.when,
-      order,
-    });
-  };
+  const openTodoMenu = useCallback((at: MenuPosition) => setMenuAt(at), []);
 
   return (
     <main
+      ref={content}
       className="app__content"
       onClick={(event) => {
-        if (event.target === event.currentTarget) selectTodo(undefined);
+        if (event.target === event.currentTarget) useStore.getState().selectTodo(undefined);
       }}
     >
       <div className="app__inner app__inner--enter" key={selectedList}>
@@ -402,7 +523,7 @@ export function ListView() {
                 droppable
                   ? (event) => {
                       event.preventDefault();
-                      commitDrop(section, drop?.targetId, drop?.edge ?? 'bottom');
+                      commitDrop(section.id, drop?.targetId, drop?.edge ?? 'bottom');
                     }
                   : undefined
               }
@@ -453,55 +574,26 @@ export function ListView() {
                     );
                   }
                   const todo = row.todo;
-                  if (todo.id === editingTodoId) {
-                    return <TaskEditor key={todo.id} todo={todo} />;
-                  }
                   const isDropTarget =
                     droppable && drop?.sectionId === section.id && drop.targetId === todo.id;
                   return (
-                    <TaskRow
+                    <ListTaskRow
                       key={todo.id}
                       todo={todo}
                       projectsById={projectsById}
                       areasById={areasById}
                       tagsById={tagsById}
-                      selected={selectedIds.has(todo.id)}
-                      draggable={Boolean(section.reorderable && todo.status === 'open')}
-                      dragging={draggedIds.has(todo.id)}
+                      visibleIds={visibleIds}
+                      sectionId={section.id}
+                      reorderable={Boolean(section.reorderable)}
                       dropEdge={isDropTarget ? drop?.edge : undefined}
                       muted={section.muted}
                       showWhen={options.showWhen}
                       showContainer={options.showContainer}
-                      onClick={(event) => handleClick(todo.id, event)}
-                      onContextMenu={(event) => {
-                        event.preventDefault();
-                        // Right-clicking outside the selection selects that row first.
-                        if (!selectedIds.has(todo.id)) selectTodo(todo.id);
-                        setMenuAt({ x: event.clientX, y: event.clientY });
-                      }}
-                      onTagClick={(tagId) => selectList(`tag:${tagId}`)}
-                      onOpen={() => openEditor(todo.id)}
-                      onToggle={() => {
-                        if (todo.trashed) restoreTodo(todo.id);
-                        else if (todo.status === 'open') completeTodo(todo.id);
-                        else uncompleteTodo(todo.id);
-                      }}
-                      onDragStart={(event) => beginDrag(todo.id, event)}
-                      onDragOver={(event, edge) => {
-                        if (!droppable) return;
-                        event.stopPropagation();
-                        allowDrop(event, { sectionId: section.id, targetId: todo.id, edge });
-                      }}
-                      onDrop={(event, edge) => {
-                        if (!droppable) return;
-                        event.preventDefault();
-                        event.stopPropagation();
-                        commitDrop(section, todo.id, edge);
-                      }}
-                      onDragEnd={() => {
-                        setDrop(null);
-                        endDrag();
-                      }}
+                      onOpenMenu={openTodoMenu}
+                      onAllowDrop={allowDrop}
+                      onCommitDrop={commitDrop}
+                      onFinishDrag={finishDrag}
                     />
                   );
                 })}

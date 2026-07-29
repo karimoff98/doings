@@ -536,6 +536,27 @@ export function listCount(db: Database, key: ListKey): number {
   return 0;
 }
 
+/**
+ * Calculates every visible smart-list badge with one shared project lookup.
+ * Sidebar used to call listCount for all eight rows, rebuilding the same map
+ * each time even though only three lists can have a badge.
+ */
+export function smartListCounts(db: Database): Partial<Record<SmartList, number>> {
+  const projectsById = new Map(db.projects.map((project) => [project.id, project]));
+  const openRows = (sections: Section[]) =>
+    sections.reduce(
+      (sum, section) =>
+        sum +
+        section.rows.filter((row) => row.kind === 'todo' && row.todo.status === 'open').length,
+      0,
+    );
+  return {
+    inbox: inboxTodos(db, projectsById).filter((todo) => todo.status === 'open').length,
+    today: openRows(todayList(db, projectsById)),
+    important: openRows(importantList(db, projectsById)),
+  };
+}
+
 export function listTitle(db: Database, key: ListKey): string {
   const list = parseListKey(key);
   switch (list.kind) {

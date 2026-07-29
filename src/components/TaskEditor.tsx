@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatDayShort } from '../domain/dates';
 import { projectTitle } from '../domain/lists';
 import { describeRepeat } from '../domain/repeat';
-import type { Todo } from '../domain/types';
+import type { ChecklistItem, Todo } from '../domain/types';
 import { registerPendingEdit } from '../store/pendingEdits';
 import { useStore } from '../store/store';
 import { AutoTextarea } from './AutoTextarea';
@@ -17,6 +17,83 @@ interface TaskEditorProps {
 }
 
 type OpenPanel = 'none' | 'when' | 'deadline' | 'tags' | 'repeat' | 'reminder';
+
+interface ChecklistTitleInputProps {
+  todoId: string;
+  item: ChecklistItem;
+  inputRef: (node: HTMLInputElement | null) => void;
+  onAddAfter: () => void;
+  onRemoveEmpty: () => void;
+}
+
+/**
+ * Checklist text stays local while typing, just like the task title and notes.
+ * Committing every character used to rebuild the whole derived list and queue a
+ * database save. A short pause, blur, Enter, close or quit still saves it.
+ */
+function ChecklistTitleInput({
+  todoId,
+  item,
+  inputRef,
+  onAddAfter,
+  onRemoveEmpty,
+}: ChecklistTitleInputProps) {
+  const updateChecklistItem = useStore((state) => state.updateChecklistItem);
+  const [title, setTitle] = useState(item.title);
+  const local = useRef(title);
+  const stored = useRef(item.title);
+  const debounce = useRef<number | undefined>(undefined);
+  local.current = title;
+  stored.current = item.title;
+
+  const flush = useCallback(() => {
+    if (debounce.current) {
+      window.clearTimeout(debounce.current);
+      debounce.current = undefined;
+    }
+    if (local.current !== stored.current) {
+      const next = local.current;
+      stored.current = next;
+      updateChecklistItem(todoId, item.id, { title: next });
+    }
+  }, [item.id, todoId, updateChecklistItem]);
+
+  const scheduleFlush = useCallback(() => {
+    if (debounce.current) window.clearTimeout(debounce.current);
+    debounce.current = window.setTimeout(flush, 350);
+  }, [flush]);
+
+  useEffect(() => flush, [flush]);
+  useEffect(() => registerPendingEdit(flush), [flush]);
+  useEffect(() => {
+    if (!debounce.current) setTitle(item.title);
+  }, [item.title]);
+
+  return (
+    <input
+      className="checkitem__input"
+      value={title}
+      placeholder="Пункт"
+      ref={inputRef}
+      onChange={(event) => {
+        setTitle(event.target.value);
+        scheduleFlush();
+      }}
+      onBlur={flush}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          flush();
+          onAddAfter();
+        }
+        if (event.key === 'Backspace' && !title) {
+          event.preventDefault();
+          onRemoveEmpty();
+        }
+      }}
+    />
+  );
+}
 
 function whenLabel(
   todo: Todo,
@@ -238,31 +315,23 @@ export function TaskEditor({ todo }: TaskEditorProps) {
               >
                 {item.done && <Icon name="check" size={9} />}
               </button>
-              <input
-                className="checkitem__input"
-                value={item.title}
-                placeholder="Пункт"
-                ref={(node) => {
+              <ChecklistTitleInput
+                todoId={todo.id}
+                item={item}
+                inputRef={(node) => {
                   if (node) checklistInputs.current.set(item.id, node);
                   else checklistInputs.current.delete(item.id);
                 }}
-                onChange={(event) =>
-                  updateChecklistItem(todo.id, item.id, { title: event.target.value })
-                }
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault();
-                    // New item goes right below this one, not at the very end.
-                    setFocusChecklistId(addChecklistItem(todo.id, { afterId: item.id }));
-                  }
-                  if (event.key === 'Backspace' && !item.title) {
-                    event.preventDefault();
-                    const position = todo.checklist.findIndex((c) => c.id === item.id);
-                    const neighbour = todo.checklist[position - 1] ?? todo.checklist[position + 1];
-                    removeChecklistItem(todo.id, item.id);
-                    if (neighbour) setFocusChecklistId(neighbour.id);
-                    else card.current?.querySelector<HTMLElement>('.editor__title')?.focus();
-                  }
+                onAddAfter={() => {
+                  // New item goes right below this one, not at the very end.
+                  setFocusChecklistId(addChecklistItem(todo.id, { afterId: item.id }));
+                }}
+                onRemoveEmpty={() => {
+                  const position = todo.checklist.findIndex((c) => c.id === item.id);
+                  const neighbour = todo.checklist[position - 1] ?? todo.checklist[position + 1];
+                  removeChecklistItem(todo.id, item.id);
+                  if (neighbour) setFocusChecklistId(neighbour.id);
+                  else card.current?.querySelector<HTMLElement>('.editor__title')?.focus();
                 }}
               />
               <button

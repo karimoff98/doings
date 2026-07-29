@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useDeferredValue, useMemo, useState } from 'react';
 import { SMART_LIST_META, projectTitle } from '../domain/lists';
 import { SMART_LISTS } from '../domain/types';
 import type { ListKey } from '../domain/types';
@@ -16,6 +16,23 @@ interface Hit {
   todoId?: string;
 }
 
+interface IndexedHit extends Hit {
+  search: string;
+  /** Tasks stay hidden until the user starts typing. */
+  task: boolean;
+}
+
+function searchHits(index: IndexedHit[], query: string): Hit[] {
+  const q = query.trim().toLocaleLowerCase();
+  const result: Hit[] = [];
+  for (const hit of index) {
+    if ((!q && hit.task) || (q && !hit.search.includes(q))) continue;
+    result.push(hit);
+    if (result.length === 40) break;
+  }
+  return result;
+}
+
 /** ⌘F: one field to jump to any list, project or todo. */
 export function QuickFind() {
   const open = useStore((s) => s.quickFindOpen);
@@ -25,31 +42,36 @@ export function QuickFind() {
   const selectTodo = useStore((s) => s.selectTodo);
   const [query, setQuery] = useState('');
   const [cursor, setCursor] = useState(0);
+  const deferredQuery = useDeferredValue(query);
 
-  const hits = useMemo<Hit[]>(() => {
-    const q = query.trim().toLowerCase();
-    const result: Hit[] = [];
+  /**
+   * Titles and notes are normalized only when the database changes. Previously
+   * every keypress rebuilt maps and lowercased every task before filtering.
+   */
+  const searchIndex = useMemo<IndexedHit[]>(() => {
+    const result: IndexedHit[] = [];
     const areasById = new Map(db.areas.map((area) => [area.id, area]));
     const projectsById = new Map(db.projects.map((project) => [project.id, project]));
 
     for (const key of SMART_LISTS) {
       const meta = SMART_LIST_META[key];
-      if (!q || meta.title.toLowerCase().includes(q)) {
-        result.push({
-          key: `list:${key}`,
-          title: meta.title,
-          icon: meta.icon as IconName,
-          color: meta.accent,
-          list: key,
-        });
-      }
+      result.push({
+        key: `list:${key}`,
+        title: meta.title,
+        search: meta.title.toLocaleLowerCase(),
+        task: false,
+        icon: meta.icon as IconName,
+        color: meta.accent,
+        list: key,
+      });
     }
 
     for (const area of db.areas) {
-      if (q && !area.title.toLowerCase().includes(q)) continue;
       result.push({
         key: `area:${area.id}`,
         title: area.title,
+        search: area.title.toLocaleLowerCase(),
+        task: false,
         icon: 'area',
         list: `area:${area.id}`,
       });
@@ -57,10 +79,11 @@ export function QuickFind() {
 
     for (const project of db.projects.filter((p) => !p.trashed)) {
       const name = projectTitle(project);
-      if (q && !name.toLowerCase().includes(q)) continue;
       result.push({
         key: `project:${project.id}`,
         title: name,
+        search: name.toLocaleLowerCase(),
+        task: false,
         sub: project.areaId ? areasById.get(project.areaId)?.title : undefined,
         icon: 'project',
         color: 'var(--c-project)',
@@ -69,41 +92,43 @@ export function QuickFind() {
     }
 
     for (const tag of db.tags) {
-      if (q && !tag.title.toLowerCase().includes(q)) continue;
       result.push({
         key: `tag:${tag.id}`,
         title: tag.title,
+        search: tag.title.toLocaleLowerCase(),
+        task: false,
         sub: 'тег',
         icon: 'tag',
         list: `tag:${tag.id}`,
       });
     }
 
-    if (q) {
-      for (const todo of db.todos.filter((t) => !t.trashed)) {
-        const haystack = `${todo.title} ${todo.notes}`.toLowerCase();
-        if (!haystack.includes(q)) continue;
-        const project = todo.projectId ? projectsById.get(todo.projectId) : undefined;
-        const area = todo.areaId ? areasById.get(todo.areaId) : undefined;
-        result.push({
-          key: `todo:${todo.id}`,
-          title: todo.title || 'Без названия',
-          sub: project ? projectTitle(project) : (area?.title ?? 'Входящие'),
-          icon: 'check',
-          list: project
-            ? `project:${project.id}`
-            : area
-              ? `area:${area.id}`
-              : todo.status === 'open'
-                ? 'inbox'
-                : 'logbook',
-          todoId: todo.id,
-        });
-      }
+    for (const todo of db.todos) {
+      if (todo.trashed) continue;
+      const project = todo.projectId ? projectsById.get(todo.projectId) : undefined;
+      const area = todo.areaId ? areasById.get(todo.areaId) : undefined;
+      result.push({
+        key: `todo:${todo.id}`,
+        title: todo.title || 'Без названия',
+        search: `${todo.title} ${todo.notes}`.toLocaleLowerCase(),
+        task: true,
+        sub: project ? projectTitle(project) : (area?.title ?? 'Входящие'),
+        icon: 'check',
+        list: project
+          ? `project:${project.id}`
+          : area
+            ? `area:${area.id}`
+            : todo.status === 'open'
+              ? 'inbox'
+              : 'logbook',
+        todoId: todo.id,
+      });
     }
 
-    return result.slice(0, 40);
-  }, [db, query]);
+    return result;
+  }, [db]);
+
+  const hits = useMemo(() => searchHits(searchIndex, deferredQuery), [deferredQuery, searchIndex]);
 
   if (!open) return null;
 
@@ -147,7 +172,10 @@ export function QuickFind() {
             }
             if (event.key === 'Enter') {
               event.preventDefault();
-              const hit = hits[cursor];
+              // Deferred results may still show the previous query for a frame.
+              // Enter must always use what is visibly typed in the field.
+              const currentHits = query === deferredQuery ? hits : searchHits(searchIndex, query);
+              const hit = currentHits[cursor];
               if (hit) go(hit);
             }
             if (event.key === 'Escape') {

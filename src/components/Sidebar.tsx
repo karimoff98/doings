@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { DragEvent, MouseEvent as ReactMouseEvent } from 'react';
-import { SMART_LIST_META, listCount, projectStats, projectTitle } from '../domain/lists';
+import { SMART_LIST_META, projectStats, projectTitle, smartListCounts } from '../domain/lists';
 import { comboLabel, shiftShortcutLabel } from '../domain/platform';
 import type { Area, ListKey, Project, SmartList } from '../domain/types';
 import { useStore } from '../store/store';
@@ -288,6 +288,7 @@ export function Sidebar() {
   const looseProjects = useMemo(() => activeProjects.filter((p) => !p.areaId), [activeProjects]);
   const areas = useMemo(() => [...db.areas].sort((a, b) => a.index - b.index), [db.areas]);
   const statsByProject = useMemo(() => projectStats(db), [db]);
+  const smartCounts = useMemo(() => smartListCounts(db), [db]);
 
   /** Places the dragged project next to `target`, moving it between areas if needed. */
   const dropProjectNear = (id: string, target: Project, after: boolean) => {
@@ -430,7 +431,7 @@ export function Sidebar() {
 
   const renderSmart = (key: SmartList) => {
     const meta = SMART_LIST_META[key];
-    const count = listCount(db, key);
+    const count = smartCounts[key] ?? 0;
     return (
       <button
         key={key}
