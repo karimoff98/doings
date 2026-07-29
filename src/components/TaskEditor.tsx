@@ -71,6 +71,7 @@ export function TaskEditor({ todo }: TaskEditorProps) {
   const commitTodoText = useStore((s) => s.commitTodoText);
   const setWhen = useStore((s) => s.setWhen);
   const setDeadline = useStore((s) => s.setDeadline);
+  const setImportant = useStore((s) => s.setImportant);
   const setRepeat = useStore((s) => s.setRepeat);
   const setReminder = useStore((s) => s.setReminder);
   const toggleTag = useStore((s) => s.toggleTag);
@@ -338,7 +339,7 @@ export function TaskEditor({ todo }: TaskEditorProps) {
             type="button"
             className="tool"
             aria-label="Когда"
-            title="Когда"
+            data-tooltip="Когда"
             onClick={() => setPanel(panel === 'when' ? 'none' : 'when')}
           >
             <Icon name="calendar" size={15} />
@@ -351,12 +352,23 @@ export function TaskEditor({ todo }: TaskEditorProps) {
           />
         </span>
 
+        <button
+          type="button"
+          className={`tool${todo.important ? ' tool--important' : ''}`}
+          aria-label={todo.important ? 'Убрать из важных' : 'Отметить как важное'}
+          aria-pressed={Boolean(todo.important)}
+          data-tooltip={todo.important ? 'Убрать из важных' : 'Отметить как важное'}
+          onClick={() => setImportant(todo.id, !todo.important)}
+        >
+          <Icon name="important" size={15} />
+        </button>
+
         <span className="anchor">
           <button
             type="button"
             className="tool"
             aria-label="Срок сдачи"
-            title="Срок сдачи"
+            data-tooltip="Срок сдачи"
             onClick={() => setPanel(panel === 'deadline' ? 'none' : 'deadline')}
           >
             <Icon name="flag" size={15} />
@@ -374,7 +386,7 @@ export function TaskEditor({ todo }: TaskEditorProps) {
             type="button"
             className="tool"
             aria-label="Напоминание"
-            title="Напоминание"
+            data-tooltip="Напоминание"
             onClick={() => setPanel(panel === 'reminder' ? 'none' : 'reminder')}
           >
             <Icon name="clock" size={15} />
@@ -392,7 +404,7 @@ export function TaskEditor({ todo }: TaskEditorProps) {
             type="button"
             className="tool"
             aria-label="Повтор"
-            title="Повтор"
+            data-tooltip="Повтор"
             onClick={() => setPanel(panel === 'repeat' ? 'none' : 'repeat')}
           >
             <Icon name="repeat" size={15} />
@@ -410,7 +422,7 @@ export function TaskEditor({ todo }: TaskEditorProps) {
             type="button"
             className="tool"
             aria-label="Теги"
-            title="Теги"
+            data-tooltip="Теги"
             onClick={() => setPanel(panel === 'tags' ? 'none' : 'tags')}
           >
             <Icon name="tag" size={15} />
@@ -429,7 +441,7 @@ export function TaskEditor({ todo }: TaskEditorProps) {
           type="button"
           className="tool"
           aria-label="Добавить пункт списка"
-          title="Список"
+          data-tooltip="Добавить пункт списка"
           onClick={() => setFocusChecklistId(addChecklistItem(todo.id))}
           data-testid="add-checklist-item"
         >
@@ -440,7 +452,7 @@ export function TaskEditor({ todo }: TaskEditorProps) {
           type="button"
           className="tool"
           aria-label="Переместить"
-          title="Переместить"
+          data-tooltip="Переместить"
           onClick={() => setMoveDialog(true)}
         >
           <Icon name="move" size={15} />
@@ -452,7 +464,7 @@ export function TaskEditor({ todo }: TaskEditorProps) {
           type="button"
           className="tool tool--danger"
           aria-label="Удалить задачу"
-          title="Удалить"
+          data-tooltip="Удалить задачу"
           onClick={() => {
             trashTodo(todo.id);
             closeEditor();

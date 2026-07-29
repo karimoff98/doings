@@ -13,7 +13,7 @@ import { SaveIndicator } from './SaveIndicator';
 
 const GROUPS: SmartList[][] = [
   ['inbox'],
-  ['today', 'upcoming', 'anytime', 'someday'],
+  ['today', 'important', 'upcoming', 'anytime', 'someday'],
   ['logbook', 'trash'],
 ];
 
@@ -41,6 +41,7 @@ function useSidebarDrop(): SidebarDrop {
   const draggingIds = useStore((s) => s.draggingIds);
   const moveTodo = useStore((s) => s.moveTodo);
   const setWhen = useStore((s) => s.setWhen);
+  const setImportant = useStore((s) => s.setImportant);
   const completeTodo = useStore((s) => s.completeTodo);
   const trashTodo = useStore((s) => s.trashTodo);
   const endDrag = useStore((s) => s.endDrag);
@@ -63,6 +64,9 @@ function useSidebarDrop(): SidebarDrop {
         return;
       case 'today':
         setWhen(ids, { kind: 'today' });
+        return;
+      case 'important':
+        setImportant(ids, true);
         return;
       case 'anytime':
         setWhen(ids, { kind: 'unscheduled' });

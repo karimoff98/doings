@@ -197,6 +197,7 @@ export function validateDatabase(raw: unknown): ValidationResult | null {
     headingId: optionalId(row.headingId),
     when: when(row.when),
     deadline: isoDay(row.deadline),
+    important: bool(row.important),
     reminder: clockTime(row.reminder),
     repeat: repeat(row.repeat),
     seriesId: optionalId(row.seriesId),

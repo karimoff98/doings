@@ -47,6 +47,7 @@ export function QuickEntry() {
       </div>
       <div className="quick__hint">
         <span>⏎ сохранить</span>
+        <span>сегодня · завтра · в пятницу · в 18:00</span>
         <span>Esc закрыть</span>
       </div>
     </div>

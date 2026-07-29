@@ -14,6 +14,7 @@ export function BulkBar() {
   const selection = useStore((s) => s.selection);
   const selectedList = useStore((s) => s.selectedList);
   const setWhen = useStore((s) => s.setWhen);
+  const setImportant = useStore((s) => s.setImportant);
   const completeTodo = useStore((s) => s.completeTodo);
   const trashTodo = useStore((s) => s.trashTodo);
   const setMoveDialog = useStore((s) => s.setMoveDialog);
@@ -26,6 +27,15 @@ export function BulkBar() {
       <span className="bulkbar__count">
         {selection.length} {plural(selection.length)}
       </span>
+      <button
+        type="button"
+        className="tool"
+        title="Отметить как важное"
+        aria-label="Отметить как важное"
+        onClick={() => setImportant(selection, true)}
+      >
+        <Icon name="important" size={15} />
+      </button>
       <button
         type="button"
         className="tool"

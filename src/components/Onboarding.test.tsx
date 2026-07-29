@@ -29,9 +29,9 @@ let root: Root;
 /** Native menu commands are delivered through the preload bridge. */
 let menuHandler: ((command: string, payload?: string) => void) | null = null;
 
-function sendMenuCommand(command: string): void {
+function sendMenuCommand(command: string, payload?: string): void {
   if (!menuHandler) throw new Error('меню не подписано');
-  menuHandler(command);
+  menuHandler(command, payload);
 }
 
 /** ⌘N as the global keyboard layer sees it: the listener sits on the window. */
@@ -267,6 +267,43 @@ describe('онбординг', () => {
 
     expect(useStore.getState().db.todos).toHaveLength(before + 2);
     expect(useStore.getState().editingTodoId).not.toBe(created);
+  });
+
+  it('быстрый ввод переносит распознанные дату и время в задачу', () => {
+    visible.firstRun = false;
+    act(() => useStore.getState().resetToEmpty());
+    render();
+
+    act(() => sendMenuCommand('quick-add', 'Позвонить завтра в 18:30'));
+
+    const todo = useStore.getState().db.todos[0];
+    expect(todo).toMatchObject({
+      title: 'Позвонить',
+      when: { kind: 'scheduled' },
+      reminder: '18:30',
+    });
+    expect(todo.when.date).toBeDefined();
+    expect(todo.projectId).toBeUndefined();
+    expect(todo.areaId).toBeUndefined();
+    expect(useStore.getState().editingTodoId).toBeUndefined();
+  });
+
+  it('быстрый ввод сохраняет две одинаковые задачи и время у обеих', () => {
+    visible.firstRun = false;
+    act(() => useStore.getState().resetToEmpty());
+    act(() => useStore.getState().selectList('today'));
+    render();
+
+    act(() => sendMenuCommand('quick-add', 'Позвонить завтра в 18:30'));
+    act(() => sendMenuCommand('quick-add', 'Позвонить завтра в 18:30'));
+
+    const todos = useStore.getState().db.todos;
+    expect(todos).toHaveLength(2);
+    expect(new Set(todos.map((todo) => todo.id)).size).toBe(2);
+    expect(todos.map((todo) => todo.title)).toEqual(['Позвонить', 'Позвонить']);
+    expect(todos.map((todo) => todo.reminder)).toEqual(['18:30', '18:30']);
+    expect(useStore.getState().selectedList).toBe('inbox');
+    expect(useStore.getState().selectedTodoId).toBe(todos[1].id);
   });
 
   it('после завершения знакомства демонстрационных данных нет', () => {

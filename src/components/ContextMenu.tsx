@@ -16,6 +16,7 @@ export function ContextMenu({ at, onClose }: ContextMenuProps) {
   const selection = useStore((s) => s.selection);
   const anchor = useStore((s) => s.selectedTodoId);
   const setWhen = useStore((s) => s.setWhen);
+  const setImportant = useStore((s) => s.setImportant);
   const openEditorPanel = useStore((s) => s.openEditorPanel);
   const setMoveDialog = useStore((s) => s.setMoveDialog);
   const duplicateTodo = useStore((s) => s.duplicateTodo);
@@ -32,6 +33,7 @@ export function ContextMenu({ at, onClose }: ContextMenuProps) {
 
   const inTrash = todos.every((todo) => todo.trashed);
   const allDone = todos.every((todo) => todo.status === 'completed');
+  const allImportant = todos.every((todo) => todo.important);
 
   const groups: MenuItem[][] = inTrash
     ? [
@@ -78,6 +80,13 @@ export function ContextMenu({ at, onClose }: ContextMenuProps) {
           },
         ],
         [
+          {
+            key: 'important',
+            label: allImportant ? 'Убрать из важных' : 'Отметить как важное',
+            icon: 'important',
+            color: 'var(--c-important)',
+            run: () => setImportant(selection, !allImportant),
+          },
           {
             key: 'when',
             label: 'Выбрать дату…',

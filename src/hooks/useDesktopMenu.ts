@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { selectSections } from '../domain/lists';
+import { parseQuickEntry } from '../domain/quickEntry';
 import { SMART_LISTS } from '../domain/types';
 import type { SmartList } from '../domain/types';
 import { useStore } from '../store/store';
@@ -49,8 +50,17 @@ export function useDesktopMenu() {
           // Text captured in the Quick Entry window lands in the Inbox.
           const title = (payload ?? '').trim();
           if (!title) return;
-          const id = store.createTodo({ title, target: {}, when: { kind: 'unscheduled' } });
+          const parsed = parseQuickEntry(title);
+          const id = store.createTodo({
+            ...parsed,
+            target: {},
+            important: false,
+            tagIds: [],
+          });
           store.closeEditor();
+          // Quick Entry always creates an Inbox item. Show the destination so a
+          // scheduled task does not look lost while the app is on Today.
+          store.selectList('inbox');
           store.selectTodo(id);
           return;
         }
@@ -108,6 +118,13 @@ export function useDesktopMenu() {
         case 'anytime':
           store.setWhen(selection, { kind: 'unscheduled' });
           return;
+        case 'important': {
+          const allImportant = selection.every(
+            (id) => store.db.todos.find((todo) => todo.id === id)?.important,
+          );
+          store.setImportant(selection, !allImportant);
+          return;
+        }
         case 'when':
           store.openEditorPanel(anchor, 'when');
           return;

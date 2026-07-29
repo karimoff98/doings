@@ -101,6 +101,30 @@ describe('пакетные действия и отмена', () => {
 });
 
 describe('создание в отфильтрованном списке', () => {
+  it('создаёт важную задачу прямо из списка «Важное»', () => {
+    store().selectList('important');
+    const id = store().createTodo({ title: 'Не забыть' });
+
+    expect(store().db.todos.find((todo) => todo.id === id)?.important).toBe(true);
+    expect(
+      selectSections(store().db, 'important')
+        .flatMap((section) => section.rows)
+        .some((row) => row.kind === 'todo' && row.todo.id === id),
+    ).toBe(true);
+  });
+
+  it('снятие важности убирает задачу из списка и закрывает редактор', () => {
+    const id = store().createTodo({ title: 'Было важно', important: true });
+    store().selectList('important');
+    store().openEditor(id);
+
+    store().setImportant(id, false);
+
+    expect(store().editingTodoId).toBeUndefined();
+    expect(store().selection).toEqual([]);
+    expect(store().db.todos.find((todo) => todo.id === id)?.important).toBe(false);
+  });
+
   it('наследует активный тег и не исчезает сразу после создания', () => {
     const tag = store().db.tags[0];
     store().selectList('today');
@@ -562,6 +586,7 @@ describe('корзина и гидратация', () => {
 
     store().setWhen(todo.id, { kind: 'someday' });
     store().setDeadline(todo.id, today());
+    store().setImportant(todo.id, true);
     store().moveTodo(todo.id, {});
     store().uncompleteTodo(todo.id);
     store().addChecklistItem(todo.id, { title: 'Лишний пункт' });
@@ -574,6 +599,7 @@ describe('корзина и гидратация', () => {
     const after = store().db.todos.find((item) => item.id === todo.id);
     expect(after?.when).toEqual(before.when);
     expect(after?.deadline).toBe(before.deadline);
+    expect(after?.important).toBe(before.important);
     expect(after?.projectId).toBe(before.projectId);
     expect(after?.areaId).toBe(before.areaId);
     expect(after?.status).toBe('completed');

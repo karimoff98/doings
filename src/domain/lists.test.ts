@@ -136,6 +136,37 @@ describe('Предстоящие', () => {
   });
 });
 
+describe('Важное', () => {
+  it('показывает только открытые важные задачи и считает их', () => {
+    const db = database({
+      todos: [
+        todo({ id: 'важная', important: true }),
+        todo({ id: 'обычная' }),
+        todo({ id: 'готовая важная', important: true, status: 'completed' }),
+        todo({ id: 'удалённая важная', important: true, trashed: true }),
+      ],
+    });
+
+    expect(titles(db, 'important')).toEqual(['важная']);
+    expect(listCount(db, 'important')).toBe(1);
+  });
+
+  it('не вытаскивает задачи из завершённых и отложенных проектов', () => {
+    const db = database({
+      projects: [
+        project({ id: 'закрыт', status: 'completed' }),
+        project({ id: 'потом', when: { kind: 'someday' } }),
+      ],
+      todos: [
+        todo({ id: 'из закрытого', projectId: 'закрыт', important: true }),
+        todo({ id: 'из отложенного', projectId: 'потом', important: true }),
+      ],
+    });
+
+    expect(titles(db, 'important')).toEqual([]);
+  });
+});
+
 describe('В любое время и Когда-нибудь', () => {
   const db = database({
     projects: [project({ id: 'потом', when: { kind: 'someday' } })],

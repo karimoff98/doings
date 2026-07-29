@@ -3,6 +3,7 @@ import type { JSX } from 'react';
 export type IconName =
   | 'inbox'
   | 'star'
+  | 'important'
   | 'calendar'
   | 'layers'
   | 'box'
@@ -50,6 +51,13 @@ const paths: Record<IconName, JSX.Element> = {
       d="M8 1.6l1.9 4 4.4.5-3.3 3 .9 4.3L8 11.2l-3.9 2.2.9-4.3-3.3-3 4.4-.5L8 1.6z"
       fill="currentColor"
     />
+  ),
+  important: (
+    <>
+      <circle cx="8" cy="8" r="5.8" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M8 4.3v4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <circle cx="8" cy="11.7" r="1" fill="currentColor" />
+    </>
   ),
   calendar: (
     <>
@@ -218,13 +226,23 @@ const paths: Record<IconName, JSX.Element> = {
     />
   ),
   notes: (
-    <path
-      d="M3 4.4h10M3 8h10M3 11.6h6"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-    />
+    <>
+      <path
+        d="M4 2.2h5.6l2.8 2.8v8.8H4z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.35"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M9.6 2.2V5h2.8M6.2 8h4M6.2 10.7h3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.25"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </>
   ),
   checklist: (
     <>

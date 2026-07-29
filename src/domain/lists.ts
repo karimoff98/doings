@@ -23,6 +23,7 @@ export interface ListMeta {
 export const SMART_LIST_META: Record<SmartList, Omit<ListMeta, 'key'>> = {
   inbox: { title: 'Входящие', icon: 'inbox', accent: 'var(--c-inbox)' },
   today: { title: 'Сегодня', icon: 'star', accent: 'var(--c-today)' },
+  important: { title: 'Важное', icon: 'important', accent: 'var(--c-important)' },
   upcoming: { title: 'Предстоящие', icon: 'calendar', accent: 'var(--c-upcoming)' },
   anytime: { title: 'В любое время', icon: 'layers', accent: 'var(--c-anytime)' },
   someday: { title: 'Когда-нибудь', icon: 'box', accent: 'var(--c-someday)' },
@@ -253,6 +254,13 @@ function somedayList(db: Database, projectsById: ReadonlyMap<Id, Project>): Sect
   return groupByContainer(db, todos, projectsById);
 }
 
+function importantList(db: Database, projectsById: ReadonlyMap<Id, Project>): Section[] {
+  const todos = db.todos.filter(
+    (todo) => isLive(todo) && todo.important && !blockedByProject(projectsById, todo),
+  );
+  return groupByContainer(db, todos, projectsById);
+}
+
 function logbookList(db: Database): Section[] {
   /** Completed todos and completed projects share the timeline, newest first. */
   const byDay = new Map<IsoDay, { at: string; row: Row }[]>();
@@ -392,6 +400,8 @@ export function selectSections(db: Database, key: ListKey): Section[] {
       ];
     case 'today':
       return todayList(db, projectsById);
+    case 'important':
+      return importantList(db, projectsById);
     case 'upcoming':
       return upcomingList(db, projectsById);
     case 'anytime':
@@ -418,6 +428,9 @@ export function listCount(db: Database, key: ListKey): number {
   if (list.kind === 'inbox') return inboxTodos(db, projectsById).length;
   if (list.kind === 'today') {
     return todayList(db, projectsById).reduce((sum, section) => sum + section.rows.length, 0);
+  }
+  if (list.kind === 'important') {
+    return importantList(db, projectsById).reduce((sum, section) => sum + section.rows.length, 0);
   }
   if (list.kind === 'project') {
     return db.todos.filter((t) => t.projectId === list.id && t.status === 'open' && !t.trashed)

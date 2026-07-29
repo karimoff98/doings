@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent, MouseEvent } from 'react';
-import { formatDayShort } from '../domain/dates';
+import { formatDayLong, formatDayShort, formatWeekday, tomorrow } from '../domain/dates';
 import { shortcutLabel } from '../domain/platform';
 import {
   SMART_LIST_META,
@@ -26,6 +26,7 @@ import { Popover } from './Popover';
 import { TaskEditor } from './TaskEditor';
 import { TaskRow } from './TaskRow';
 import type { DropEdge } from './TaskRow';
+import { UpcomingMonth } from './UpcomingMonth';
 import { DeadlinePopover, WhenPopover } from './WhenPopover';
 
 /**
@@ -38,6 +39,8 @@ function emptyText(kind: string): string {
       return `Входящие пусты — нажмите ${shortcutLabel('N')}, чтобы добавить задачу.`;
     case 'today':
       return 'На сегодня ничего не запланировано.';
+    case 'important':
+      return 'Важных задач пока нет.';
     case 'upcoming':
       return 'Нет предстоящих задач.';
     case 'anytime':
@@ -63,6 +66,7 @@ function emptyText(kind: string): string {
 function rowOptions(kind: string): { showWhen: boolean; showContainer: boolean } {
   switch (kind) {
     case 'today':
+    case 'important':
     case 'upcoming':
     case 'logbook':
     case 'trash':
@@ -134,6 +138,8 @@ export function ListView() {
   const [drop, setDrop] = useState<DropState | null>(null);
   const [menuAt, setMenuAt] = useState<ContextMenuTarget | null>(null);
   const [tagMenu, setTagMenu] = useState<{ at: MenuPosition; tag: Tag } | null>(null);
+  const [upcomingView, setUpcomingView] = useState<'list' | 'month'>('list');
+  const [calendarDay, setCalendarDay] = useState(() => tomorrow());
 
   const list = parseListKey(selectedList);
   const projectsById = useMemo(
@@ -160,14 +166,20 @@ export function ListView() {
     () => applyTagFilter(allSections, activeFilter),
     [allSections, activeFilter],
   );
+  const monthView = list.kind === 'upcoming' && upcomingView === 'month';
+  const visibleSections = useMemo(
+    () => (monthView ? sections.filter((section) => section.id === calendarDay) : sections),
+    [monthView, sections, calendarDay],
+  );
   const options = rowOptions(list.kind);
   const hasRows = sections.some((section) => section.rows.length > 0);
+  const selectedDayHasRows = visibleSections.some((section) => section.rows.length > 0);
   const visibleIds = useMemo(
     () =>
-      sections.flatMap((section) =>
+      visibleSections.flatMap((section) =>
         section.rows.flatMap((row) => (row.kind === 'todo' ? [row.todo.id] : [])),
       ),
-    [sections],
+    [visibleSections],
   );
 
   const handleClick = (id: Id, event: MouseEvent) => {
@@ -274,7 +286,40 @@ export function ListView() {
           </div>
         )}
 
-        {!hasRows && (
+        {list.kind === 'upcoming' && (
+          <div className="upcoming__toolbar">
+            <div className="segmented" role="group" aria-label="Вид предстоящих задач">
+              <button
+                type="button"
+                className={`segmented__item${upcomingView === 'list' ? ' segmented__item--on' : ''}`}
+                aria-pressed={upcomingView === 'list'}
+                onClick={() => setUpcomingView('list')}
+              >
+                Список
+              </button>
+              <button
+                type="button"
+                className={`segmented__item${upcomingView === 'month' ? ' segmented__item--on' : ''}`}
+                aria-pressed={upcomingView === 'month'}
+                onClick={() => setUpcomingView('month')}
+              >
+                Месяц
+              </button>
+            </div>
+          </div>
+        )}
+
+        {monthView && (
+          <>
+            <UpcomingMonth sections={sections} value={calendarDay} onPick={setCalendarDay} />
+            <header className="monthview__selection">
+              <span className="monthview__selection-title">{formatDayLong(calendarDay)}</span>
+              <span className="monthview__selection-subtitle">{formatWeekday(calendarDay)}</span>
+            </header>
+          </>
+        )}
+
+        {!hasRows && !monthView && (
           <p className="empty" data-testid="empty-state">
             {activeFilter.length ? 'Нет задач с этими тегами.' : emptyText(list.kind)}
             {/* One optional action, only where pressing something is the point. */}
@@ -286,7 +331,20 @@ export function ListView() {
           </p>
         )}
 
-        {sections.map((section) => {
+        {monthView && !selectedDayHasRows && (
+          <p className="empty monthview__empty">
+            На этот день задач нет.
+            <button
+              type="button"
+              className="empty__action"
+              onClick={() => createTodo({ when: { kind: 'scheduled', date: calendarDay } })}
+            >
+              Новая задача
+            </button>
+          </p>
+        )}
+
+        {visibleSections.map((section) => {
           const droppable = Boolean(section.reorderable && draggingIds.length);
           // Drop-target-only groups stay out of the way until something is dragged.
           if (section.placeholder && !draggingIds.length) return null;
@@ -312,18 +370,19 @@ export function ListView() {
                   : undefined
               }
             >
-              {section.title && section.container?.headingId ? (
-                <HeadingRow id={section.container.headingId} title={section.title} />
-              ) : (
-                section.title && (
-                  <header className="section__head">
-                    <span className="section__title">{section.title}</span>
-                    {section.subtitle && (
-                      <span className="section__subtitle">{section.subtitle}</span>
-                    )}
-                  </header>
-                )
-              )}
+              {!monthView &&
+                (section.title && section.container?.headingId ? (
+                  <HeadingRow id={section.container.headingId} title={section.title} />
+                ) : (
+                  section.title && (
+                    <header className="section__head">
+                      <span className="section__title">{section.title}</span>
+                      {section.subtitle && (
+                        <span className="section__subtitle">{section.subtitle}</span>
+                      )}
+                    </header>
+                  )
+                ))}
               <div>
                 {section.rows.map((row) => {
                   if (row.kind === 'project') {
@@ -486,7 +545,9 @@ export function ListView() {
           data-tour="new-todo"
           aria-label="Новая задача"
           title={`Новая задача (${shortcutLabel('N')})`}
-          onClick={() => createTodo()}
+          onClick={() =>
+            createTodo(monthView ? { when: { kind: 'scheduled', date: calendarDay } } : undefined)
+          }
         >
           <Icon name="plus" size={20} />
         </button>

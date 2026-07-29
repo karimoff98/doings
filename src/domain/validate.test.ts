@@ -36,9 +36,22 @@ describe('validateDatabase: починка данных', () => {
       tagIds: [],
       status: 'open',
       trashed: false,
+      important: false,
     });
     expect(todo.when).toEqual({ kind: 'unscheduled' });
     expect(typeof todo.createdAt).toBe('string');
+  });
+
+  it('сохраняет отметку важности и безопасно выключает неизвестное значение', () => {
+    const result = validateDatabase({
+      ...empty,
+      todos: [
+        { id: 'td_1', important: true },
+        { id: 'td_2', important: 'да' },
+      ],
+    });
+
+    expect(result!.db.todos.map((todo) => todo.important)).toEqual([true, false]);
   });
 
   it('выбрасывает записи без идентификатора и дубли', () => {

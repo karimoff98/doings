@@ -78,6 +78,12 @@ export function nextRepeatCopy(todo: Todo, makeId: (prefix: string) => string): 
     next === today()
       ? { kind: todo.when.kind === 'evening' ? 'evening' : 'today' }
       : { kind: 'scheduled', date: next };
+  const sourceCreatedAt = Date.parse(todo.createdAt);
+  // Reopening the source removes copies created after it. On a fast machine the
+  // source and its copy can otherwise receive the exact same millisecond.
+  const copyCreatedAt = new Date(
+    Number.isNaN(sourceCreatedAt) ? Date.now() : Math.max(Date.now(), sourceCreatedAt + 1),
+  ).toISOString();
 
   return {
     id: makeId('td'),
@@ -99,7 +105,7 @@ export function nextRepeatCopy(todo: Todo, makeId: (prefix: string) => string): 
     tagIds: [...todo.tagIds],
     status: 'open',
     trashed: false,
-    createdAt: new Date().toISOString(),
+    createdAt: copyCreatedAt,
     index: todo.index,
   };
 }

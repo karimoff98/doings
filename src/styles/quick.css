@@ -40,6 +40,7 @@
 
 .quick__hint {
   display: flex;
+  justify-content: space-between;
   gap: 14px;
   padding-left: 28px;
   font-size: 11px;

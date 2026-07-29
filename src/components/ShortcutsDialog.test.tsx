@@ -52,7 +52,8 @@ describe('справка по горячим клавишам', () => {
     expect(table['Новый проект']).toBe('⇧⌘N');
     expect(table['Напоминание']).toBe('⌥⌘R');
     expect(table['В корзину']).toBe('⌘⌫');
-    expect(table['Списки 1–7']).toBe('⌘1…⌘7');
+    expect(table['Списки 1–8']).toBe('⌘1…⌘8');
+    expect(table['Важное']).toBe('⇧⌘I');
     expect(table['Открыть задачу']).toBe('⏎ или Space');
   });
 
@@ -63,7 +64,8 @@ describe('справка по горячим клавишам', () => {
     expect(table['Новый проект']).toBe('Ctrl+Shift+N');
     expect(table['Напоминание']).toBe('Ctrl+Alt+R');
     expect(table['В корзину']).toBe('Ctrl+Backspace');
-    expect(table['Списки 1–7']).toBe('Ctrl+1…Ctrl+7');
+    expect(table['Списки 1–8']).toBe('Ctrl+1…Ctrl+8');
+    expect(table['Важное']).toBe('Ctrl+Shift+I');
     expect(table['Открыть задачу']).toBe('Enter или Space');
     expect(table['Быстрый ввод (глобально)']).toBe('Ctrl+Alt+Space');
     expect(table['Выделить точечно']).toBe('Ctrl-клик');

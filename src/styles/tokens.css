@@ -22,6 +22,7 @@
   /* List accents are shared between themes: Things keeps its icon colors. */
   --c-inbox: #4a90d9;
   --c-today: #f9c440;
+  --c-important: #ef8f32;
   --c-upcoming: #e4574c;
   --c-anytime: #1fa3b8;
   --c-someday: #b7924f;

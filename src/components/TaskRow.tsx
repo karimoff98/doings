@@ -118,21 +118,37 @@ export function TaskRow({
           {todo.title || 'Новая задача'}
         </span>
 
+        {todo.important && (
+          <span
+            className="row__meta row__meta--important"
+            role="img"
+            aria-label="Важная задача"
+            data-tooltip="Важная задача"
+          >
+            <Icon name="important" size={11} />
+          </span>
+        )}
+
         {showTodayStar && (
-          <span className="row__meta row__meta--today" title="Сегодня">
+          <span
+            className="row__meta row__meta--today"
+            role="img"
+            aria-label={todo.when.kind === 'evening' ? 'Сегодня вечером' : 'Сегодня'}
+            data-tooltip={todo.when.kind === 'evening' ? 'Сегодня вечером' : 'Сегодня'}
+          >
             <Icon name={todo.when.kind === 'evening' ? 'moon' : 'star'} size={11} />
           </span>
         )}
 
         {showWhen && scheduled && (
-          <span className="row__meta">
+          <span className="row__meta" data-tooltip={`Запланировано: ${formatDayShort(scheduled)}`}>
             <Icon name="calendar" size={11} />
             {formatDayShort(scheduled)}
           </span>
         )}
 
         {todo.reminder && (
-          <span className="row__meta" title="Напоминание">
+          <span className="row__meta" data-tooltip={`Напоминание: ${todo.reminder}`}>
             <Icon name="clock" size={11} />
             {todo.reminder}
           </span>
@@ -143,7 +159,7 @@ export function TaskRow({
             className={`row__meta${
               isPast(todo.deadline) || isToday(todo.deadline) ? ' row__meta--deadline' : ''
             }`}
-            title="Срок сдачи"
+            data-tooltip={`Срок сдачи: ${formatDayShort(todo.deadline)}`}
           >
             <Icon name="flag" size={11} />
             {formatDayShort(todo.deadline)}
@@ -157,7 +173,7 @@ export function TaskRow({
             key={tag.id}
             type="button"
             className="chip chip--tag"
-            title={`Показать всё с тегом «${tag.title}»`}
+            data-tooltip={`Показать всё с тегом «${tag.title}»`}
             onClick={(event) => {
               // A tag on a row is the shortest path to "everything with this tag".
               event.stopPropagation();
@@ -170,13 +186,31 @@ export function TaskRow({
 
         <span className="row__indicators">
           {todo.repeat && (
-            <span title={describeRepeat(todo.repeat)}>
+            <span
+              className="row__indicator"
+              role="img"
+              aria-label={describeRepeat(todo.repeat)}
+              data-tooltip={describeRepeat(todo.repeat)}
+            >
               <Icon name="repeat" size={11} />
             </span>
           )}
-          {todo.notes.trim() && <Icon name="notes" size={11} />}
+          {todo.notes.trim() && (
+            <span
+              className="row__indicator"
+              role="img"
+              aria-label="Есть заметка"
+              data-tooltip="Есть заметка"
+            >
+              <Icon name="notes" size={13} />
+            </span>
+          )}
           {todo.checklist.length > 0 && (
-            <span style={{ fontSize: 'var(--size-meta)' }}>
+            <span
+              className="row__indicator"
+              data-tooltip={`Чек-лист: ${checklistDone} из ${todo.checklist.length} выполнено`}
+              style={{ fontSize: 'var(--size-meta)' }}
+            >
               {checklistDone}/{todo.checklist.length}
             </span>
           )}

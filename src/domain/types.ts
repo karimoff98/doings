@@ -52,6 +52,8 @@ export interface Todo {
   when: When;
   /** Hard due date, shown as a red flag when close or overdue. */
   deadline?: IsoDay;
+  /** A user-controlled priority marker, independent from dates and deadlines. */
+  important?: boolean;
   /** `HH:mm`, only meaningful together with a scheduled/today date. */
   reminder?: string;
   repeat?: RepeatRule;
@@ -124,6 +126,8 @@ export const SMART_LISTS = [
   'someday',
   'logbook',
   'trash',
+  // Appended so the existing ⌘1…⌘7 shortcuts keep their meaning.
+  'important',
 ] as const;
 
 export type SmartList = (typeof SMART_LISTS)[number];

@@ -154,6 +154,50 @@
   flex: 1;
 }
 
+.editor__toolbar .tool[data-tooltip] {
+  position: relative;
+}
+
+.editor__toolbar .tool[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  z-index: 60;
+  bottom: calc(100% + 7px);
+  left: 50%;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: #111318;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, 3px);
+  transition:
+    opacity var(--dur-fast) ease,
+    transform var(--dur-fast) ease;
+}
+
+.editor__toolbar .tool[data-tooltip]:hover::after,
+.editor__toolbar .tool[data-tooltip]:focus-visible::after {
+  opacity: 1;
+  transform: translate(-50%, 0);
+  transition-delay: 350ms;
+}
+
+.editor__toolbar .tool[data-tooltip]:active::after {
+  opacity: 0;
+  transition-delay: 0ms;
+}
+
 .tool--danger:hover {
   color: var(--c-deadline);
+}
+
+.tool--important {
+  background: color-mix(in srgb, var(--c-important) 14%, transparent);
+  color: var(--c-important);
 }

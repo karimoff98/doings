@@ -94,7 +94,15 @@ export interface StoreState {
   stopTour: () => void;
   setTourStep: (step: number) => void;
 
-  createTodo: (options?: { title?: string; target?: MoveTarget; when?: When }) => Id;
+  createTodo: (options?: {
+    title?: string;
+    target?: MoveTarget;
+    when?: When;
+    deadline?: IsoDay;
+    reminder?: string;
+    important?: boolean;
+    tagIds?: Id[];
+  }) => Id;
   updateTodo: (id: Id, patch: Partial<Omit<Todo, 'id'>>) => void;
   /**
    * Title/notes edits from the open editor. Coalesced into one undo step per
@@ -104,6 +112,7 @@ export interface StoreState {
   /** All mutators below take one id or many, so multi-select needs no special casing. */
   setWhen: (ids: Id | Id[], when: When) => void;
   setDeadline: (ids: Id | Id[], deadline?: IsoDay) => void;
+  setImportant: (ids: Id | Id[], important: boolean) => void;
   setRepeat: (ids: Id | Id[], repeat?: RepeatRule) => void;
   setReminder: (ids: Id | Id[], reminder?: string) => void;
   toggleTag: (ids: Id | Id[], tagId: Id) => void;
@@ -197,24 +206,51 @@ function topIndex(items: { index: number }[]): number {
 }
 
 /** Defaults for a new todo, derived from the list the user is looking at. */
-function defaultsForList(key: ListKey): { when: When; target: MoveTarget; tagIds: Id[] } {
+function defaultsForList(key: ListKey): {
+  when: When;
+  target: MoveTarget;
+  tagIds: Id[];
+  important: boolean;
+} {
   const list = parseListKey(key);
   switch (list.kind) {
     case 'today':
-      return { when: { kind: 'today' }, target: {}, tagIds: [] };
+      return { when: { kind: 'today' }, target: {}, tagIds: [], important: false };
+    case 'important':
+      return { when: { kind: 'unscheduled' }, target: {}, tagIds: [], important: true };
     case 'upcoming':
       // Upcoming only shows future days, so today's date would hide the new todo.
-      return { when: { kind: 'scheduled', date: tomorrow() }, target: {}, tagIds: [] };
+      return {
+        when: { kind: 'scheduled', date: tomorrow() },
+        target: {},
+        tagIds: [],
+        important: false,
+      };
     case 'someday':
-      return { when: { kind: 'someday' }, target: {}, tagIds: [] };
+      return { when: { kind: 'someday' }, target: {}, tagIds: [], important: false };
     case 'project':
-      return { when: { kind: 'unscheduled' }, target: { projectId: list.id }, tagIds: [] };
+      return {
+        when: { kind: 'unscheduled' },
+        target: { projectId: list.id },
+        tagIds: [],
+        important: false,
+      };
     case 'area':
-      return { when: { kind: 'unscheduled' }, target: { areaId: list.id }, tagIds: [] };
+      return {
+        when: { kind: 'unscheduled' },
+        target: { areaId: list.id },
+        tagIds: [],
+        important: false,
+      };
     case 'tag':
-      return { when: { kind: 'unscheduled' }, target: {}, tagIds: [list.id] };
+      return {
+        when: { kind: 'unscheduled' },
+        target: {},
+        tagIds: [list.id],
+        important: false,
+      };
     default:
-      return { when: { kind: 'unscheduled' }, target: {}, tagIds: [] };
+      return { when: { kind: 'unscheduled' }, target: {}, tagIds: [], important: false };
   }
 }
 
@@ -267,6 +303,7 @@ function isUntouchedDraft(todo: Todo, listKey: ListKey): boolean {
   return (
     sameWhen &&
     sameTags &&
+    Boolean(todo.important) === defaults.important &&
     todo.projectId === defaults.target.projectId &&
     todo.areaId === defaults.target.areaId &&
     todo.headingId === defaults.target.headingId
@@ -632,7 +669,9 @@ export const useStore = create<StoreState>()(
 
           const defaults = defaultsForList(get().selectedList);
           const target = options?.target ?? defaults.target;
-          const inheritedTags = [...new Set([...defaults.tagIds, ...get().tagFilter])];
+          const inheritedTags = options?.tagIds ?? [
+            ...new Set([...defaults.tagIds, ...get().tagFilter]),
+          ];
           mutate((db) => {
             const todo: Todo = {
               id,
@@ -640,6 +679,9 @@ export const useStore = create<StoreState>()(
               notes: '',
               checklist: [],
               when: options?.when ?? defaults.when,
+              deadline: options?.deadline,
+              reminder: options?.reminder,
+              important: options?.important ?? defaults.important,
               tagIds: inheritedTags,
               status: 'open',
               trashed: false,
@@ -682,6 +724,12 @@ export const useStore = create<StoreState>()(
           mutateEach(ids, (todo) => {
             if (todo.trashed) return;
             todo.deadline = deadline;
+          }),
+
+        setImportant: (ids, important) =>
+          mutateEach(ids, (todo) => {
+            if (todo.trashed) return;
+            todo.important = important;
           }),
 
         setRepeat: (ids, repeat) =>

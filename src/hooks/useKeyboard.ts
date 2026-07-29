@@ -152,6 +152,15 @@ export function useKeyboard() {
             event.preventDefault();
             store.redo();
             return;
+          case 'i':
+            if (selection.length) {
+              event.preventDefault();
+              const allImportant = selection.every(
+                (id) => store.db.todos.find((todo) => todo.id === id)?.important,
+              );
+              store.setImportant(selection, !allImportant);
+            }
+            return;
           default:
             break;
         }

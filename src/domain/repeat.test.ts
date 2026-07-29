@@ -102,6 +102,7 @@ describe('nextRepeatCopy', () => {
     expect(copy?.reminder).toBe('09:00');
     expect(copy?.status).toBe('open');
     expect(copy?.id).not.toBe(source.id);
+    expect(Date.parse(copy!.createdAt)).toBeGreaterThan(Date.parse(source.createdAt));
   });
 
   it('связывает всю серию с первой задачей', () => {
