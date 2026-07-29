@@ -13,6 +13,20 @@ function editingText(): boolean {
   );
 }
 
+function listContaining(todoId: string): SmartList | `project:${string}` | `area:${string}` {
+  const { db } = useStore.getState();
+  for (const key of ['today', 'anytime', 'inbox', 'upcoming', 'someday'] as const) {
+    const visible = selectSections(db, key).some((section) =>
+      section.rows.some((row) => row.kind === 'todo' && row.todo.id === todoId),
+    );
+    if (visible) return key;
+  }
+  const todo = db.todos.find((item) => item.id === todoId);
+  if (todo?.projectId) return `project:${todo.projectId}`;
+  if (todo?.areaId) return `area:${todo.areaId}`;
+  return 'today';
+}
+
 /**
  * Native menu commands arrive here. On macOS the menu swallows the accelerators
  * before the page sees them, so the menu is the source of truth in the desktop app
@@ -30,6 +44,17 @@ export function useDesktopMenu() {
       const store = useStore.getState();
       const anchor = store.selectedTodoId;
       const selection = store.selection;
+
+      if (command === 'reminder:open' && payload) {
+        if (!store.db.todos.some((todo) => todo.id === payload && !todo.trashed)) return;
+        store.setSettings(false);
+        store.setQuickFind(false);
+        store.setShortcuts(false);
+        store.setDailyReview(false);
+        store.selectList(listContaining(payload));
+        store.openEditor(payload);
+        return;
+      }
 
       // Same rule as for the keyboard: while the introduction is up, menu items
       // must not change anything behind it. Quitting, reloading and the other

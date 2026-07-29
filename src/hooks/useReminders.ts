@@ -59,59 +59,85 @@ function reminderDay(todo: Todo): string | undefined {
   return undefined;
 }
 
+/** Uses the native Electron API when possible, with the browser API as a fallback. */
+async function showReminder(todo: Todo, key: string): Promise<boolean> {
+  const body = todo.notes.trim() || `Напоминание на ${todo.reminder}`;
+  const native = window.desktop?.notifications;
+  if (native) {
+    const result = await native.show({
+      title: todo.title || 'Задача',
+      body,
+      todoId: todo.id,
+    });
+    return result.ok;
+  }
+
+  if (typeof Notification === 'undefined') return false;
+  let permission = Notification.permission;
+  if (permission === 'default') permission = await Notification.requestPermission();
+  if (permission !== 'granted') return false;
+
+  const notification = new Notification(todo.title || 'Задача', {
+    body,
+    tag: key,
+  });
+  notification.onclick = () => {
+    const store = useStore.getState();
+    store.selectList(listContaining(store.db, todo.id));
+    store.openEditor(todo.id);
+    window.focus();
+  };
+  return true;
+}
+
 /**
  * Checks reminders twice a minute and fires a system notification once per
  * todo per day. Works in the browser too, if notifications are allowed.
  */
 export function useReminders() {
   useEffect(() => {
-    if (typeof Notification === 'undefined') return;
-    if (Notification.permission === 'default') {
-      void Notification.requestPermission();
-    }
-
     const fired = loadFired();
+    let checking = false;
 
-    const tick = () => {
-      if (Notification.permission !== 'granted') return;
-      const { db } = useStore.getState();
-      const day = today();
-      const now = currentTime();
-      let changed = false;
+    const tick = async () => {
+      if (checking) return;
+      checking = true;
+      try {
+        const { db } = useStore.getState();
+        const day = today();
+        const now = currentTime();
+        let changed = false;
 
-      for (const todo of db.todos) {
-        if (reminderDay(todo) !== day) continue;
-        const key = `${todo.id}:${day}:${todo.reminder}`;
-        if (fired.has(key)) continue;
-        if ((todo.reminder ?? '') > now) continue;
+        for (const todo of db.todos) {
+          if (reminderDay(todo) !== day) continue;
+          const key = `${todo.id}:${day}:${todo.reminder}`;
+          if (fired.has(key)) continue;
+          if ((todo.reminder ?? '') > now) continue;
 
-        fired.add(key);
-        changed = true;
+          // Long-past reminders are intentionally consumed, so opening the app
+          // in the evening does not fire a burst from the morning.
+          if (minutesSince(todo.reminder ?? now) > STALE_AFTER_MINUTES) {
+            fired.add(key);
+            changed = true;
+            continue;
+          }
 
-        // Long-past reminders are swallowed, so opening the app in the evening
-        // does not fire a burst of notifications from the morning.
-        if (minutesSince(todo.reminder ?? now) > STALE_AFTER_MINUTES) continue;
+          // A failed or blocked notification is not consumed: the next tick
+          // retries instead of silently losing the reminder forever.
+          if (await showReminder(todo, key)) {
+            fired.add(key);
+            changed = true;
+          }
+        }
 
-        const notification = new Notification(todo.title || 'Задача', {
-          body: todo.notes.trim() || `Напоминание на ${todo.reminder}`,
-          tag: key,
-        });
-        notification.onclick = () => {
-          // Selecting a todo the current list does not show would do nothing
-          // visible, so switch to a list where it is guaranteed to be.
-          const store = useStore.getState();
-          store.selectList(listContaining(store.db, todo.id));
-          store.openEditor(todo.id);
-          window.desktop?.focusWindow?.();
-          window.focus();
-        };
+        if (changed) saveFired(fired, day);
+      } finally {
+        checking = false;
       }
-
-      if (changed) saveFired(fired, day);
     };
 
-    tick();
-    const timer = window.setInterval(tick, CHECK_INTERVAL_MS);
+    void tick();
+    const timer = window.setInterval(() => void tick(), CHECK_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, []);
 }

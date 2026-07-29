@@ -1,4 +1,14 @@
-const { app, BrowserWindow, Menu, dialog, globalShortcut, ipcMain, shell } = require('electron');
+const {
+  app,
+  BrowserWindow,
+  Menu,
+  Notification,
+  screen,
+  dialog,
+  globalShortcut,
+  ipcMain,
+  shell,
+} = require('electron');
 const backups = require('./backups.cjs');
 const fs = require('node:fs/promises');
 const path = require('node:path');
@@ -11,6 +21,11 @@ const QUICK_ENTRY_SHORTCUT = 'Control+Alt+Space';
 
 let mainWindow = null;
 let quickWindow = null;
+let reminderWindow = null;
+let reminderWindowTodoId = null;
+let reminderWindowTimer = null;
+/** Keep native notifications alive so their click handlers remain attached. */
+const activeNotifications = new Set();
 
 function send(command) {
   const focused = BrowserWindow.getFocusedWindow();
@@ -121,6 +136,110 @@ function revealMainWindow() {
   mainWindow.show();
   mainWindow.focus();
   return mainWindow;
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+/** Unsigned macOS apps cannot use UNNotification, so show a small Doings banner. */
+function showReminderFallback({ title, body, todoId }) {
+  clearTimeout(reminderWindowTimer);
+  reminderWindow?.destroy();
+  reminderWindowTodoId = todoId;
+
+  reminderWindow = new BrowserWindow({
+    width: 380,
+    height: 132,
+    frame: false,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    show: false,
+    backgroundColor: '#25272c',
+    webPreferences: {
+      preload: path.join(__dirname, 'reminder-preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+
+  const area = screen.getPrimaryDisplay().workArea;
+  reminderWindow.setPosition(area.x + area.width - 396, area.y + 16, false);
+  reminderWindow.setAlwaysOnTop(true, 'floating');
+  reminderWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+
+  const safeTitle = escapeHtml(title || 'Doings');
+  const safeBody = escapeHtml(body || 'Напоминание');
+  const action = todoId ? 'Открыть задачу' : 'Готово';
+  const html = `<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; color: #f3f4f6; background: #25272c;
+    font: 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  .card {
+    height: 132px; padding: 16px 18px; border: 1px solid #42454d;
+    border-radius: 14px; background: #25272c;
+    box-shadow: 0 14px 40px rgba(0,0,0,.35);
+  }
+  .head { display: flex; gap: 10px; align-items: center; }
+  .icon {
+    display: grid; place-items: center; width: 28px; height: 28px;
+    border-radius: 8px; background: #4d8df7; color: white; font-size: 17px;
+  }
+  .title { min-width: 0; flex: 1; font-weight: 650; font-size: 15px; }
+  .close {
+    border: 0; color: #9da1aa; background: transparent; font-size: 20px;
+    line-height: 1; padding: 3px 5px; cursor: pointer;
+  }
+  .body {
+    margin: 9px 38px 0; color: #b7bac2; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .action {
+    float: right; margin-top: 10px; border: 0; border-radius: 7px;
+    padding: 6px 12px; background: #3a66a8; color: white; cursor: pointer;
+  }
+</style>
+<body>
+  <div class="card">
+    <div class="head">
+      <div class="icon">✓</div>
+      <div class="title">${safeTitle}</div>
+      <button class="close" type="button" aria-label="Закрыть">×</button>
+    </div>
+    <div class="body">${safeBody}</div>
+    <button class="action" type="button">${action}</button>
+  </div>
+<script>
+  document.querySelector('.close').addEventListener('click', () => window.reminder.close());
+  document.querySelector('.action').addEventListener('click', () => window.reminder.open());
+</script>
+</body>
+</html>`;
+
+  void reminderWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+  reminderWindow.once('ready-to-show', () => reminderWindow?.showInactive());
+  reminderWindow.once('closed', () => {
+    reminderWindow = null;
+    reminderWindowTodoId = null;
+    clearTimeout(reminderWindowTimer);
+  });
+  reminderWindowTimer = setTimeout(() => reminderWindow?.close(), 15_000);
+  return { ok: true, fallback: true };
 }
 
 /**
@@ -433,7 +552,12 @@ function backupsDir() {
   return backups.backupsDirFor(app.getPath('userData'));
 }
 
-ipcMain.handle('backup:list', () => backups.listBackups(backupsDir()));
+ipcMain.handle('backup:list', async () => {
+  // Applying retention while opening Settings also cleans up copies created by
+  // an older version with a larger limit.
+  await backups.prune(backupsDir());
+  return backups.listBackups(backupsDir());
+});
 
 ipcMain.handle('backup:create', (_event, reason) => {
   // Copies queue behind saves: the file is read only once nothing is writing it.
@@ -456,6 +580,78 @@ ipcMain.handle('app:info', () => ({
   platform: process.platform,
   packaged: app.isPackaged,
 }));
+
+ipcMain.handle('notification:show', (_event, raw) => {
+  const title =
+    typeof raw?.title === 'string' && raw.title.trim() ? raw.title.trim().slice(0, 200) : 'Doings';
+  const body = typeof raw?.body === 'string' ? raw.body.trim().slice(0, 1000) : '';
+  const todoId =
+    typeof raw?.todoId === 'string' && raw.todoId.trim()
+      ? raw.todoId.trim().slice(0, 200)
+      : undefined;
+
+  if (!Notification.isSupported() || (isMac && !app.isPackaged)) {
+    return showReminderFallback({ title, body, todoId });
+  }
+
+  return new Promise((resolve) => {
+    const notification = new Notification({
+      title,
+      body,
+      silent: false,
+    });
+    activeNotifications.add(notification);
+    let settled = false;
+
+    function finish(result) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deliveryTimer);
+      resolve(result);
+    }
+
+    notification.once('show', () => finish({ ok: true }));
+    notification.once('failed', (_notificationEvent, error) => {
+      activeNotifications.delete(notification);
+      finish({
+        ...showReminderFallback({ title, body, todoId }),
+        detail: String(error).slice(0, 500),
+      });
+    });
+    notification.once('close', () => activeNotifications.delete(notification));
+    notification.once('click', () => {
+      activeNotifications.delete(notification);
+      if (todoId) void deliverToMainWindow('reminder:open', todoId);
+      else revealMainWindow();
+    });
+    const deliveryTimer = setTimeout(() => {
+      activeNotifications.delete(notification);
+      finish({
+        ...showReminderFallback({ title, body, todoId }),
+        detail: 'Система не подтвердила показ уведомления за 5 секунд',
+      });
+    }, 5000);
+
+    try {
+      notification.show();
+    } catch (error) {
+      activeNotifications.delete(notification);
+      finish({ ok: false, reason: 'failed', detail: String(error).slice(0, 500) });
+    }
+  });
+});
+
+ipcMain.on('reminder-window:close', (event) => {
+  if (event.sender === reminderWindow?.webContents) reminderWindow.close();
+});
+
+ipcMain.on('reminder-window:open', (event) => {
+  if (event.sender !== reminderWindow?.webContents) return;
+  const todoId = reminderWindowTodoId;
+  reminderWindow.close();
+  if (todoId) void deliverToMainWindow('reminder:open', todoId);
+  else revealMainWindow();
+});
 
 ipcMain.handle('storage:path', () => databasePath());
 
@@ -629,6 +825,8 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', () => revealMainWindow());
 
   app.whenReady().then(async () => {
+    // Windows associates native notifications with this stable application id.
+    app.setAppUserModelId('com.eduardkarimov.doings');
     await migrateUserData();
     buildMenu();
     createWindow();

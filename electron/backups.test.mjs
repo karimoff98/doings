@@ -212,9 +212,13 @@ describe('автоматические копии', () => {
     expect(
       backups.shouldAutoBackup({ items, hash: 'новый', now: at('2026-07-28T14:00:00.000Z') }),
     ).toBe(false);
-    // Seven hours later: due.
+    // Seven hours later: still too soon.
     expect(
       backups.shouldAutoBackup({ items, hash: 'новый', now: at('2026-07-28T19:00:00.000Z') }),
+    ).toBe(false);
+    // A full day later: due.
+    expect(
+      backups.shouldAutoBackup({ items, hash: 'новый', now: at('2026-07-29T12:00:00.000Z') }),
     ).toBe(true);
   });
 
@@ -264,8 +268,8 @@ describe('ограничение количества', () => {
 
     const { items } = await backups.listBackups(dir);
     expect(items).toHaveLength(backups.LIMITS.automatic);
-    // The newest survive; the three oldest are gone.
-    expect(items[items.length - 1].createdAt).toBe('2026-07-28T00:03:00.000Z');
+    // The newest five survive; the eight oldest are gone.
+    expect(items[items.length - 1].createdAt).toBe('2026-07-28T00:08:00.000Z');
   });
 
   it('ручные копии живут дольше автоматических', async () => {

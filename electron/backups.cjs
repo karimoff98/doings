@@ -28,13 +28,13 @@ const AUTO_REASON = 'automatic';
 
 /** Retention: automatic copies are plentiful, the ones before risky steps are not. */
 const LIMITS = {
-  automatic: 10,
+  automatic: 5,
   guard: 5,
   total: 30,
 };
 
 /** An automatic copy at most once per this window. */
-const AUTO_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const AUTO_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 const NAME_PATTERN = /^database-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}(?:-\d+)?\.json$/;
 

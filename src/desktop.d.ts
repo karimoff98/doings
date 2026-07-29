@@ -59,6 +59,14 @@ interface SaveOutcome {
   detail?: string;
 }
 
+interface NotificationShowOutcome {
+  ok: boolean;
+  /** Doings banner used because unsigned macOS apps cannot call UNNotification. */
+  fallback?: boolean;
+  reason?: 'unsupported' | 'failed';
+  detail?: string;
+}
+
 /** API exposed by the Electron preload script. Absent in the browser. */
 interface DesktopBridge {
   platform: string;
@@ -72,6 +80,14 @@ interface DesktopBridge {
   focusWindow?: () => void;
   /** Version, architecture and packaging of the running build. */
   appInfo?: () => Promise<AppInfo>;
+  /** Native Electron notifications, delivered by the operating system. */
+  notifications?: {
+    show: (payload: {
+      title: string;
+      body: string;
+      todoId?: string;
+    }) => Promise<NotificationShowOutcome>;
+  };
   /** Called before quitting; answer with `reportFlushed`. Returns an unsubscribe. */
   onFlushRequest?: (callback: () => void) => () => void;
   reportFlushed?: (ok: boolean, error?: string) => void;

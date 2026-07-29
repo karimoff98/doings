@@ -32,6 +32,16 @@ contextBridge.exposeInMainWorld('desktop', {
   appInfo() {
     return ipcRenderer.invoke('app:info');
   },
+  notifications: {
+    show(payload) {
+      return ipcRenderer.invoke('notification:show', {
+        title: typeof payload?.title === 'string' ? payload.title.trim().slice(0, 200) : 'Doings',
+        body: typeof payload?.body === 'string' ? payload.body.trim().slice(0, 1000) : '',
+        todoId:
+          typeof payload?.todoId === 'string' ? payload.todoId.trim().slice(0, 200) : undefined,
+      });
+    },
+  },
   /**
    * The main process asks for a flush before quitting; the renderer must answer
    * with `reportFlushed`, otherwise the app waits for the timeout.
