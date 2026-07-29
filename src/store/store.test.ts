@@ -69,6 +69,30 @@ describe('пакетные действия и отмена', () => {
     ).toBe(true);
   });
 
+  it('применяет весь план дня одним шагом истории', () => {
+    const ids = store()
+      .db.todos.filter((todo) => todo.status === 'open' && !todo.trashed)
+      .slice(0, 3)
+      .map((todo) => todo.id);
+    const before = ids.map((id) => store().db.todos.find((todo) => todo.id === id)?.when);
+
+    store().applyDailyReview([
+      { id: ids[0], when: { kind: 'today' } },
+      { id: ids[1], when: { kind: 'scheduled', date: shiftDay(today(), 1) } },
+      { id: ids[2], when: { kind: 'someday' } },
+    ]);
+
+    expect(store().past).toHaveLength(1);
+    expect(ids.map((id) => store().db.todos.find((todo) => todo.id === id)?.when.kind)).toEqual([
+      'today',
+      'scheduled',
+      'someday',
+    ]);
+
+    store().undo();
+    expect(ids.map((id) => store().db.todos.find((todo) => todo.id === id)?.when)).toEqual(before);
+  });
+
   it('отмена уводит из списка, которого больше нет', () => {
     const projectId = store().createProject({ title: 'Скоро исчезнет' });
     store().selectList(`project:${projectId}`);

@@ -69,6 +69,10 @@ export interface StoreState {
   moveDialogOpen: boolean;
   shortcutsOpen: boolean;
   settingsOpen: boolean;
+  /** Daily planning is optional and remembered between launches. */
+  dailyReviewEnabled: boolean;
+  /** The review dialog itself is session-only. */
+  dailyReviewOpen: boolean;
   /**
    * The first-run introduction is modal: while it is up, keyboard shortcuts and
    * menu commands must not reach the app behind it. Session-only, never stored.
@@ -107,6 +111,8 @@ export interface StoreState {
   setMoveDialog: (open: boolean) => void;
   setShortcuts: (open: boolean) => void;
   setSettings: (open: boolean) => void;
+  setDailyReviewEnabled: (enabled: boolean) => void;
+  setDailyReview: (open: boolean) => void;
   setOnboarding: (open: boolean) => void;
   startTour: () => void;
   stopTour: () => void;
@@ -130,6 +136,8 @@ export interface StoreState {
   commitTodoText: (id: Id, patch: { title?: string; notes?: string }) => void;
   /** All mutators below take one id or many, so multi-select needs no special casing. */
   setWhen: (ids: Id | Id[], when: When) => void;
+  /** Applies the whole daily plan as one undoable database mutation. */
+  applyDailyReview: (changes: { id: Id; when: When }[]) => void;
   setDeadline: (ids: Id | Id[], deadline?: IsoDay) => void;
   setImportant: (ids: Id | Id[], important: boolean) => void;
   setRepeat: (ids: Id | Id[], repeat?: RepeatRule) => void;
@@ -368,6 +376,7 @@ const storeStorage = appStorage
           previous.selectedList === next.selectedList &&
           previous.theme === next.theme &&
           previous.completionLogging === next.completionLogging &&
+          previous.dailyReviewEnabled === next.dailyReviewEnabled &&
           previous.collapsedCompletedLists === next.collapsedCompletedLists
         );
       },
@@ -535,6 +544,8 @@ export const useStore = create<StoreState>()(
         moveDialogOpen: false,
         shortcutsOpen: false,
         settingsOpen: false,
+        dailyReviewEnabled: true,
+        dailyReviewOpen: false,
         onboardingOpen: false,
         tourOpen: false,
         tourStep: 0,
@@ -703,6 +714,21 @@ export const useStore = create<StoreState>()(
         setMoveDialog: (open) => set((state) => void (state.moveDialogOpen = open)),
         setShortcuts: (open) => set((state) => void (state.shortcutsOpen = open)),
         setSettings: (open) => set((state) => void (state.settingsOpen = open)),
+        setDailyReviewEnabled: (enabled) =>
+          set((state) => {
+            state.dailyReviewEnabled = enabled;
+            if (!enabled) state.dailyReviewOpen = false;
+          }),
+        setDailyReview: (open) =>
+          set((state) => {
+            state.dailyReviewOpen = open;
+            if (open) {
+              state.quickFindOpen = false;
+              state.moveDialogOpen = false;
+              state.shortcutsOpen = false;
+              state.settingsOpen = false;
+            }
+          }),
         setOnboarding: (open) => set((state) => void (state.onboardingOpen = open)),
         startTour: () =>
           set((state) => {
@@ -710,6 +736,7 @@ export const useStore = create<StoreState>()(
             state.moveDialogOpen = false;
             state.shortcutsOpen = false;
             state.settingsOpen = false;
+            state.dailyReviewOpen = false;
             state.tourStep = 0;
             state.tourOpen = true;
           }),
@@ -792,6 +819,27 @@ export const useStore = create<StoreState>()(
             // A reminder without a day has nothing to fire on.
             if (when.kind === 'someday' || when.kind === 'unscheduled') todo.reminder = undefined;
           }),
+
+        applyDailyReview: (changes) => {
+          mutate((db) => {
+            for (const change of changes) {
+              const todo = findTodo(db, change.id);
+              if (!todo || todo.trashed || todo.status !== 'open') continue;
+              todo.when =
+                change.when.kind === 'scheduled' ? { ...change.when } : { kind: change.when.kind };
+              if (change.when.kind === 'someday' || change.when.kind === 'unscheduled') {
+                todo.reminder = undefined;
+              }
+            }
+          });
+          set((state) => {
+            state.dailyReviewOpen = false;
+            state.selection = [];
+            state.selectedTodoId = undefined;
+            state.selectionAnchor = undefined;
+            state.editingTodoId = undefined;
+          });
+        },
 
         setDeadline: (ids, deadline) =>
           mutateEach(ids, (todo) => {
@@ -1346,6 +1394,7 @@ export const useStore = create<StoreState>()(
         selectedList: state.selectedList,
         theme: state.theme,
         completionLogging: state.completionLogging,
+        dailyReviewEnabled: state.dailyReviewEnabled,
         collapsedCompletedLists: state.collapsedCompletedLists,
       }),
       /** Runs only when the stored version differs from the current one. */

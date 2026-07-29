@@ -199,6 +199,7 @@ export interface FlushResult {
 
 /** Marker of a finished onboarding, kept separately from the database. */
 const ONBOARDING_KEY = 'doings.onboarding.completed.v1';
+const DAILY_REVIEW_KEY = 'doings.daily-review.last-shown.v1';
 
 /** What the initial read found. Decided once, while loading. */
 type LoadOutcome = 'unknown' | 'empty' | 'existing' | 'failed';
@@ -231,6 +232,23 @@ export function markOnboardingComplete(): void {
     globalThis.localStorage?.setItem(ONBOARDING_KEY, '1');
   } catch {
     // Nothing to do: the worst case is showing the introduction once more.
+  }
+}
+
+/** The review is offered at most once for a local calendar day. */
+export function wasDailyReviewShown(day: string): boolean {
+  try {
+    return globalThis.localStorage?.getItem(DAILY_REVIEW_KEY) === day;
+  } catch {
+    return true;
+  }
+}
+
+export function markDailyReviewShown(day: string): void {
+  try {
+    globalThis.localStorage?.setItem(DAILY_REVIEW_KEY, day);
+  } catch {
+    // Without storage we avoid blocking the review itself; it may return later.
   }
 }
 

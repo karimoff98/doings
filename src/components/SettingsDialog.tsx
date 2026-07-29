@@ -43,6 +43,9 @@ export function SettingsDialog() {
   const setTheme = useStore((s) => s.setTheme);
   const completionLogging = useStore((s) => s.completionLogging);
   const setCompletionLogging = useStore((s) => s.setCompletionLogging);
+  const dailyReviewEnabled = useStore((s) => s.dailyReviewEnabled);
+  const setDailyReviewEnabled = useStore((s) => s.setDailyReviewEnabled);
+  const setDailyReview = useStore((s) => s.setDailyReview);
   const db = useStore((s) => s.db);
   const importDatabase = useStore((s) => s.importDatabase);
   const resetToEmpty = useStore((s) => s.resetToEmpty);
@@ -107,6 +110,44 @@ export function SettingsDialog() {
                   {option.label}
                 </button>
               ))}
+            </div>
+          </section>
+
+          <section className="settings__row">
+            <div>
+              <div className="settings__label">Планирование дня</div>
+              <div className="settings__hint">
+                Один раз в день предлагает разобрать незавершённые задачи
+              </div>
+            </div>
+            <div className="settings__actions">
+              <div className="segmented" role="radiogroup" aria-label="Планирование дня">
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={dailyReviewEnabled}
+                  className={`segmented__item${dailyReviewEnabled ? ' segmented__item--on' : ''}`}
+                  onClick={() => setDailyReviewEnabled(true)}
+                >
+                  Включено
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={!dailyReviewEnabled}
+                  className={`segmented__item${!dailyReviewEnabled ? ' segmented__item--on' : ''}`}
+                  onClick={() => setDailyReviewEnabled(false)}
+                >
+                  Выключено
+                </button>
+              </div>
+              <button
+                type="button"
+                className="settings__button settings__button--quiet"
+                onClick={() => setDailyReview(true)}
+              >
+                Открыть сейчас
+              </button>
             </div>
           </section>
 

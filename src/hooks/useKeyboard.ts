@@ -47,13 +47,15 @@ export function useKeyboard() {
         store.quickFindOpen ||
         store.moveDialogOpen ||
         store.shortcutsOpen ||
-        store.settingsOpen
+        store.settingsOpen ||
+        store.dailyReviewOpen
       ) {
         if (event.key === 'Escape') {
           store.setQuickFind(false);
           store.setMoveDialog(false);
           store.setShortcuts(false);
           store.setSettings(false);
+          store.setDailyReview(false);
         }
         if (mod && key === 'f') event.preventDefault();
         return;

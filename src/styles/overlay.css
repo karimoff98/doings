@@ -445,6 +445,144 @@
   box-shadow: 0 1px 3px rgba(20, 24, 33, 0.16);
 }
 
+/* Daily planning */
+.review__scrim {
+  align-items: center;
+  padding-top: 0;
+}
+
+.review {
+  width: min(760px, 94vw);
+  max-height: min(720px, 84vh);
+}
+
+.review__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 20px 22px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.review__mark {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  flex: none;
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--c-today) 16%, transparent);
+  color: var(--c-today);
+}
+
+.review__header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.review__header p {
+  margin: 3px 0 0;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.review__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 14px;
+}
+
+.review__item {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-height: 62px;
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.review__item:last-child {
+  border-bottom: 0;
+}
+
+.review__task {
+  flex: 1;
+  min-width: 150px;
+}
+
+.review__title,
+.review__meta {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review__title {
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.review__meta {
+  min-height: 16px;
+  margin-top: 3px;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+
+.review__choices {
+  display: flex;
+  flex: none;
+  gap: 3px;
+  padding: 3px;
+  border-radius: 9px;
+  background: var(--bg-chip);
+}
+
+.review__choice {
+  padding: 5px 8px;
+  border-radius: 7px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.review__choice:hover {
+  color: var(--text-primary);
+}
+
+.review__choice--on {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  box-shadow: 0 1px 3px rgba(20, 24, 33, 0.16);
+}
+
+.review__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  padding: 14px 22px 18px;
+  border-top: 1px solid var(--line);
+}
+
+.review__apply {
+  background: var(--accent);
+  color: #fff;
+}
+
+@media (max-width: 680px) {
+  .review__item {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .review__choices {
+    align-self: flex-start;
+    flex-wrap: wrap;
+  }
+}
+
 /* Storage banner */
 .notice {
   position: fixed;

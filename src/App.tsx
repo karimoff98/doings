@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ListView } from './components/ListView';
+import { DailyReview } from './components/DailyReview';
 import { GuidedTour } from './components/GuidedTour';
 import { MoveDialog } from './components/MoveDialog';
 import { Onboarding } from './components/Onboarding';
@@ -114,6 +115,7 @@ export function App() {
       <StorageNotice />
       {!troubled && <Onboarding />}
       {!troubled && <GuidedTour />}
+      {!troubled && <DailyReview />}
     </div>
   );
 }
