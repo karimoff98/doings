@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Id, Tag } from '../domain/types';
 import { Icon } from './Icon';
 import { Popover } from './Popover';
@@ -26,6 +26,11 @@ export function TagPopover({
   const trimmed = query.trim();
   const visible = tags.filter((tag) => tag.title.toLowerCase().includes(trimmed.toLowerCase()));
   const exists = tags.some((tag) => tag.title.toLowerCase() === trimmed.toLowerCase());
+
+  // A search from the previous opening must not make tags appear to be missing.
+  useEffect(() => {
+    if (!open) setQuery('');
+  }, [open]);
 
   const submit = () => {
     if (!trimmed) return;

@@ -38,8 +38,8 @@ export function Menu({ at, groups, title, onClose }: MenuProps) {
     if (!node) return;
     const box = node.getBoundingClientRect();
     setPosition({
-      x: Math.min(at.x, window.innerWidth - box.width - MARGIN),
-      y: Math.min(at.y, window.innerHeight - box.height - MARGIN),
+      x: Math.max(MARGIN, Math.min(at.x, window.innerWidth - box.width - MARGIN)),
+      y: Math.max(MARGIN, Math.min(at.y, window.innerHeight - box.height - MARGIN)),
     });
   }, [at]);
 

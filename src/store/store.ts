@@ -251,6 +251,41 @@ function isBlank(todo: Todo): boolean {
   );
 }
 
+/** Only a brand-new task that still matches the list defaults is safe to discard. */
+function isUntouchedDraft(todo: Todo, listKey: ListKey): boolean {
+  if (!isBlank(todo)) return false;
+  if (todo.deadline || todo.reminder || todo.repeat || todo.status !== 'open' || todo.trashed) {
+    return false;
+  }
+  const defaults = defaultsForList(listKey);
+  const sameWhen =
+    todo.when.kind === defaults.when.kind &&
+    (todo.when.kind !== 'scheduled' || todo.when.date === defaults.when.date);
+  const sameTags =
+    todo.tagIds.length === defaults.tagIds.length &&
+    todo.tagIds.every((id) => defaults.tagIds.includes(id));
+  return (
+    sameWhen &&
+    sameTags &&
+    todo.projectId === defaults.target.projectId &&
+    todo.areaId === defaults.target.areaId &&
+    todo.headingId === defaults.target.headingId
+  );
+}
+
+/** A project with any user-entered property is real even if its title is blank. */
+function isAbandonedProject(db: Database, project: Project): boolean {
+  return (
+    !project.title.trim() &&
+    !project.notes.trim() &&
+    project.when.kind === 'unscheduled' &&
+    !project.deadline &&
+    project.tagIds.length === 0 &&
+    !db.todos.some((todo) => todo.projectId === project.id) &&
+    !db.headings.some((heading) => heading.projectId === project.id)
+  );
+}
+
 /** True when the todo sits on a concrete day, so it can carry a time or a repeat. */
 function hasDay(todo: Todo): boolean {
   return (
@@ -368,10 +403,24 @@ export const useStore = create<StoreState>()(
         });
         set((state) => {
           if (!state.selection.length) return;
+          const rows = selectSections(state.db, state.selectedList).flatMap(
+            (section) => section.rows,
+          );
+          const availableTags = new Set(
+            rows.flatMap((row) => (row.kind === 'todo' ? row.todo.tagIds : [])),
+          );
+          const activeTags = state.tagFilter.filter((tagId) => availableTags.has(tagId));
           const visible = new Set(
-            selectSections(state.db, state.selectedList).flatMap((section) =>
-              section.rows.flatMap((row) => (row.kind === 'todo' ? [row.todo.id] : [])),
-            ),
+            rows.flatMap((row) => {
+              if (row.kind !== 'todo') return [];
+              if (
+                activeTags.length &&
+                !row.todo.tagIds.some((tagId) => activeTags.includes(tagId))
+              ) {
+                return [];
+              }
+              return [row.todo.id];
+            }),
           );
           state.selection = state.selection.filter((id) => visible.has(id));
           if (state.selectedTodoId && !visible.has(state.selectedTodoId)) {
@@ -379,6 +428,11 @@ export const useStore = create<StoreState>()(
           }
           if (state.selectionAnchor && !visible.has(state.selectionAnchor)) {
             state.selectionAnchor = state.selectedTodoId;
+          }
+          if (state.editingTodoId && !visible.has(state.editingTodoId)) {
+            state.editingTodoId = undefined;
+            state.freshTodoId = undefined;
+            state.autoPanel = undefined;
           }
         });
       };
@@ -423,10 +477,7 @@ export const useStore = create<StoreState>()(
             const draftId = state.draftProjectId;
             if (draftId && key !== `project:${draftId}`) {
               const draft = state.db.projects.find((p) => p.id === draftId);
-              const abandoned =
-                draft &&
-                !draft.title.trim() &&
-                !state.db.todos.some((t) => t.projectId === draftId);
+              const abandoned = draft && isAbandonedProject(state.db, draft);
               if (abandoned) {
                 state.db.projects = state.db.projects.filter((p) => p.id !== draftId);
               }
@@ -445,7 +496,7 @@ export const useStore = create<StoreState>()(
               }
               state.draftAreaId = undefined;
             }
-            state.selectedList = key;
+            state.selectedList = validList(state.db, key);
             state.selectedTodoId = undefined;
             state.selectionAnchor = undefined;
             state.selection = [];
@@ -453,6 +504,7 @@ export const useStore = create<StoreState>()(
             state.tagFilter = [];
             state.editingTodoId = undefined;
             state.freshTodoId = undefined;
+            state.autoPanel = undefined;
           }),
 
         selectTodo: (id) =>
@@ -490,6 +542,8 @@ export const useStore = create<StoreState>()(
 
         openEditor: (id) =>
           set((state) => {
+            const todo = state.db.todos.find((item) => item.id === id);
+            if (!todo || todo.trashed) return;
             state.selectedTodoId = id;
             state.selection = [id];
             state.editingTodoId = id;
@@ -497,6 +551,8 @@ export const useStore = create<StoreState>()(
 
         openEditorPanel: (id, panel) =>
           set((state) => {
+            const todo = state.db.todos.find((item) => item.id === id);
+            if (!todo || todo.trashed) return;
             state.selectedTodoId = id;
             if (!state.selection.includes(id)) state.selection = [id];
             state.editingTodoId = id;
@@ -509,13 +565,14 @@ export const useStore = create<StoreState>()(
           endTextSession();
           set((state) => {
             const id = state.editingTodoId;
+            const fresh = Boolean(id && state.freshTodoId === id);
             state.editingTodoId = undefined;
             state.freshTodoId = undefined;
             state.autoPanel = undefined;
             // Drop a todo that was created and left completely empty. Blank
             // checklist rows do not count as content.
             const todo = id ? state.db.todos.find((t) => t.id === id) : undefined;
-            if (todo && isBlank(todo)) {
+            if (todo && fresh && isUntouchedDraft(todo, state.selectedList)) {
               state.db.todos = state.db.todos.filter((t) => t.id !== todo.id);
               state.selectedTodoId = undefined;
               state.selection = [];
@@ -575,6 +632,7 @@ export const useStore = create<StoreState>()(
 
           const defaults = defaultsForList(get().selectedList);
           const target = options?.target ?? defaults.target;
+          const inheritedTags = [...new Set([...defaults.tagIds, ...get().tagFilter])];
           mutate((db) => {
             const todo: Todo = {
               id,
@@ -582,7 +640,7 @@ export const useStore = create<StoreState>()(
               notes: '',
               checklist: [],
               when: options?.when ?? defaults.when,
-              tagIds: [...defaults.tagIds],
+              tagIds: inheritedTags,
               status: 'open',
               trashed: false,
               createdAt: new Date().toISOString(),
@@ -614,6 +672,7 @@ export const useStore = create<StoreState>()(
 
         setWhen: (ids, when) =>
           mutateEach(ids, (todo) => {
+            if (todo.trashed) return;
             todo.when = when.kind === 'scheduled' ? { ...when } : { kind: when.kind };
             // A reminder without a day has nothing to fire on.
             if (when.kind === 'someday' || when.kind === 'unscheduled') todo.reminder = undefined;
@@ -621,11 +680,13 @@ export const useStore = create<StoreState>()(
 
         setDeadline: (ids, deadline) =>
           mutateEach(ids, (todo) => {
+            if (todo.trashed) return;
             todo.deadline = deadline;
           }),
 
         setRepeat: (ids, repeat) =>
           mutateEach(ids, (todo) => {
+            if (todo.trashed) return;
             todo.repeat = repeat ? { ...repeat } : undefined;
             // A repeating todo needs a day to repeat from.
             if (repeat && !hasDay(todo)) todo.when = { kind: 'today' };
@@ -633,12 +694,14 @@ export const useStore = create<StoreState>()(
 
         setReminder: (ids, reminder) =>
           mutateEach(ids, (todo) => {
+            if (todo.trashed) return;
             todo.reminder = reminder;
             if (reminder && !hasDay(todo)) todo.when = { kind: 'today' };
           }),
 
         toggleTag: (ids, tagId) =>
           mutateEach(ids, (todo) => {
+            if (todo.trashed) return;
             todo.tagIds = todo.tagIds.includes(tagId)
               ? todo.tagIds.filter((t) => t !== tagId)
               : [...todo.tagIds, tagId];
@@ -687,6 +750,7 @@ export const useStore = create<StoreState>()(
 
         uncompleteTodo: (ids) =>
           mutateEach(ids, (todo, db) => {
+            if (todo.trashed) return;
             todo.status = 'open';
             todo.completedAt = undefined;
             // Reopening a repeating todo takes back the copy its completion spawned.
@@ -720,14 +784,28 @@ export const useStore = create<StoreState>()(
             todo.trashedBy = undefined;
           }),
 
-        emptyTrash: () =>
+        emptyTrash: () => {
+          const removedProjects = new Set(
+            get()
+              .db.projects.filter((project) => project.trashed)
+              .map((project) => project.id),
+          );
           mutateAndKeepListValid((db) => {
             db.todos = db.todos.filter((t) => !t.trashed);
             db.projects = db.projects.filter((p) => !p.trashed);
-          }),
+            db.headings = db.headings.filter((heading) => !removedProjects.has(heading.projectId));
+          });
+          set((state) => {
+            state.selection = [];
+            state.selectedTodoId = undefined;
+            state.selectionAnchor = undefined;
+            state.editingTodoId = undefined;
+          });
+        },
 
         moveTodo: (ids, target) =>
           mutateEach(ids, (todo) => {
+            if (todo.trashed) return;
             todo.projectId = target.projectId;
             todo.areaId = target.areaId;
             todo.headingId = target.headingId;
@@ -739,7 +817,7 @@ export const useStore = create<StoreState>()(
           mutate((db) => {
             for (const id of list) {
               const source = findTodo(db, id);
-              if (!source) continue;
+              if (!source || source.trashed) continue;
               const copyId = newId('td');
               copies.push(copyId);
               db.todos.push({
@@ -807,7 +885,7 @@ export const useStore = create<StoreState>()(
           const id = newId('ci');
           mutate((db) => {
             const todo = findTodo(db, todoId);
-            if (!todo) return;
+            if (!todo || todo.trashed) return;
             const item = { id, title: options?.title ?? '', done: false };
             const at = options?.afterId
               ? todo.checklist.findIndex((c) => c.id === options.afterId)
@@ -820,14 +898,18 @@ export const useStore = create<StoreState>()(
 
         updateChecklistItem: (todoId, itemId, patch) =>
           mutate((db) => {
-            const item = findTodo(db, todoId)?.checklist.find((c) => c.id === itemId);
+            const todo = findTodo(db, todoId);
+            if (!todo || todo.trashed) return;
+            const item = todo.checklist.find((c) => c.id === itemId);
             if (item) Object.assign(item, patch);
           }),
 
         removeChecklistItem: (todoId, itemId) =>
           mutate((db) => {
             const todo = findTodo(db, todoId);
-            if (todo) todo.checklist = todo.checklist.filter((c) => c.id !== itemId);
+            if (todo && !todo.trashed) {
+              todo.checklist = todo.checklist.filter((c) => c.id !== itemId);
+            }
           }),
 
         freshListId: undefined,
@@ -865,12 +947,6 @@ export const useStore = create<StoreState>()(
             const project = db.projects.find((p) => p.id === id);
             if (project) Object.assign(project, patch);
           });
-          // Once it has a real name it is no longer a throwaway draft.
-          if (typeof patch.title === 'string' && patch.title.trim()) {
-            set((state) => {
-              if (state.draftProjectId === id) state.draftProjectId = undefined;
-            });
-          }
         },
 
         completeProject: (id) =>
@@ -955,11 +1031,6 @@ export const useStore = create<StoreState>()(
             const area = db.areas.find((a) => a.id === id);
             if (area) Object.assign(area, patch);
           });
-          if (typeof patch.title === 'string' && patch.title.trim()) {
-            set((state) => {
-              if (state.draftAreaId === id) state.draftAreaId = undefined;
-            });
-          }
         },
 
         trashArea: (id) =>
@@ -1005,8 +1076,13 @@ export const useStore = create<StoreState>()(
             state.future.push(db);
             state.db = previous;
             state.editingTodoId = undefined;
+            state.freshTodoId = undefined;
+            state.autoPanel = undefined;
+            state.draftProjectId = undefined;
+            state.draftAreaId = undefined;
             state.selection = [];
             state.selectedTodoId = undefined;
+            state.selectionAnchor = undefined;
             state.selectedList = validList(previous, state.selectedList);
           });
         },
@@ -1021,8 +1097,13 @@ export const useStore = create<StoreState>()(
             state.past.push(db);
             state.db = next;
             state.editingTodoId = undefined;
+            state.freshTodoId = undefined;
+            state.autoPanel = undefined;
+            state.draftProjectId = undefined;
+            state.draftAreaId = undefined;
             state.selection = [];
             state.selectedTodoId = undefined;
+            state.selectionAnchor = undefined;
             state.selectedList = validList(next, state.selectedList);
           });
         },

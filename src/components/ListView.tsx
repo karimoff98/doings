@@ -6,13 +6,15 @@ import {
   SMART_LIST_META,
   listTitle,
   projectProgress,
+  projectStats,
   projectTitle,
   selectSections,
 } from '../domain/lists';
 import { parseListKey } from '../domain/types';
-import type { Database, Id, Section, Tag } from '../domain/types';
+import type { Database, Id, ItemStatus, Section, Tag } from '../domain/types';
 import { useStore } from '../store/store';
 import { BulkBar } from './BulkBar';
+import { AutoTextarea } from './AutoTextarea';
 import { ProgressRing } from './Checkbox';
 import { ContextMenu } from './ContextMenu';
 import type { ContextMenuTarget } from './ContextMenu';
@@ -140,6 +142,7 @@ export function ListView() {
   );
   const areasById = useMemo(() => new Map(db.areas.map((area) => [area.id, area])), [db.areas]);
   const tagsById = useMemo(() => new Map(db.tags.map((tag) => [tag.id, tag])), [db.tags]);
+  const statsByProject = useMemo(() => projectStats(db), [db]);
   const selectedIds = useMemo(() => new Set(selection), [selection]);
   const draggedIds = useMemo(() => new Set(draggingIds), [draggingIds]);
   // Deriving the sections walks the whole database, so it must not run on every
@@ -239,7 +242,7 @@ export function ListView() {
         if (event.target === event.currentTarget) selectTodo(undefined);
       }}
     >
-      <div className="app__inner">
+      <div className="app__inner app__inner--enter" key={selectedList}>
         <ListHeader />
 
         {/* In a tag list the bar would just repeat the title. */}
@@ -328,9 +331,10 @@ export function ListView() {
                       <ProjectRow
                         key={row.project.id}
                         title={projectTitle(row.project)}
-                        progress={projectProgress(db, row.project.id)}
+                        progress={statsByProject.get(row.project.id)?.progress ?? 0}
                         openCount={row.openCount}
                         projectId={row.project.id}
+                        status={row.project.status}
                         trashed={row.project.trashed}
                       />
                     );
@@ -559,12 +563,14 @@ function ProjectRow({
   progress,
   openCount,
   projectId,
+  status,
   trashed,
 }: {
   title: string;
   progress: number;
   openCount: number;
   projectId: string;
+  status: ItemStatus;
   trashed?: boolean;
 }) {
   const selectList = useStore((s) => s.selectList);
@@ -573,15 +579,27 @@ function ProjectRow({
     <div
       className="row"
       role="button"
-      tabIndex={0}
-      onClick={() => selectList(`project:${projectId}`)}
+      tabIndex={trashed ? -1 : 0}
+      aria-disabled={trashed}
+      onClick={() => {
+        if (!trashed) selectList(`project:${projectId}`);
+      }}
       onKeyDown={(event) => {
-        if (event.key === 'Enter') selectList(`project:${projectId}`);
+        if (!trashed && event.key === 'Enter') selectList(`project:${projectId}`);
       }}
     >
-      <span className="checkbox checkbox--project">
-        <ProgressRing progress={progress} />
-      </span>
+      {status === 'open' ? (
+        <span className="checkbox checkbox--project">
+          <ProgressRing progress={progress} />
+        </span>
+      ) : (
+        <span
+          className={`checkbox ${status === 'canceled' ? 'checkbox--canceled' : 'checkbox--done'}`}
+          aria-label={status === 'canceled' ? 'Отменённый проект' : 'Завершённый проект'}
+        >
+          <Icon name={status === 'canceled' ? 'cross' : 'check'} size={11} />
+        </span>
+      )}
       <div className="row__body">
         <span className="row__title">{title}</span>
         {openCount > 0 && <span className="row__meta">{openCount}</span>}
@@ -648,10 +666,23 @@ function ListHeader() {
             aria-label="Название проекта"
             placeholder="Новый проект"
             onChange={(event) => updateProject(project.id, { title: event.target.value })}
+            onBlur={(event) => {
+              const projectName = event.currentTarget.value.trim();
+              if (projectName !== project.title) updateProject(project.id, { title: projectName });
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                event.currentTarget.blur();
+              }
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                selectList('today');
+              }
+            }}
           />
-          <textarea
+          <AutoTextarea
             className="listhead__notes"
-            rows={1}
             value={project.notes}
             placeholder="Заметки"
             aria-label="Заметки проекта"
@@ -773,11 +804,11 @@ function ListHeader() {
           <button
             type="button"
             className="tool"
-            aria-label="Завершить проект"
-            title="Завершить проект"
+            aria-label={project.status === 'open' ? 'Завершить проект' : 'Возобновить проект'}
+            title={project.status === 'open' ? 'Завершить проект' : 'Возобновить проект'}
             onClick={() => completeProject(project.id)}
           >
-            <Icon name="check" size={15} />
+            <Icon name={project.status === 'open' ? 'check' : 'undo'} size={15} />
           </button>
           <button
             type="button"

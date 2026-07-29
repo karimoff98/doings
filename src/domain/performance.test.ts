@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { selectSections } from './lists';
+import { projectStats, selectSections } from './lists';
 import type { Database, Project, Todo } from './types';
 
 /** A realistic stress fixture: many containers used to make every lookup scan an array. */
@@ -40,10 +40,12 @@ describe('производительность больших списков', (
     const today = selectSections(db, 'today');
     const anytime = selectSections(db, 'anytime');
     const someday = selectSections(db, 'someday');
+    const stats = projectStats(db);
 
     expect(today.flatMap((section) => section.rows)).toHaveLength(5_000);
     expect(anytime.flatMap((section) => section.rows)).toHaveLength(10_000);
     expect(someday).toHaveLength(0);
+    expect(stats.size).toBe(10_000);
     // Deliberately generous for shared CI machines; this catches accidental O(n²) scans.
     expect(performance.now() - startedAt).toBeLessThan(2_000);
   });

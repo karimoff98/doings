@@ -222,10 +222,16 @@ export function validateDatabase(raw: unknown): ValidationResult | null {
   });
   if (brokenHeadings) issues.push(`Заголовки без проекта удалены — ${brokenHeadings}`);
   const headingIds = new Set(liveHeadings.map((heading) => heading.id));
+  const headingProject = new Map(
+    liveHeadings.map((heading) => [heading.id, heading.projectId] as const),
+  );
 
   let repairedLinks = 0;
   for (const todo of todos) {
-    if (todo.headingId && !headingIds.has(todo.headingId)) {
+    if (
+      todo.headingId &&
+      (!headingIds.has(todo.headingId) || headingProject.get(todo.headingId) !== todo.projectId)
+    ) {
       todo.headingId = undefined;
       repairedLinks += 1;
     }
@@ -242,6 +248,18 @@ export function validateDatabase(raw: unknown): ValidationResult | null {
   for (const project of projects) {
     if (project.areaId && !areaIds.has(project.areaId)) {
       project.areaId = undefined;
+      repairedLinks += 1;
+    }
+    const cleanTags = project.tagIds.filter((tagId) => tagSet.has(tagId));
+    if (cleanTags.length !== project.tagIds.length) {
+      project.tagIds = cleanTags;
+      repairedLinks += 1;
+    }
+  }
+  for (const area of areas) {
+    const cleanTags = area.tagIds.filter((tagId) => tagSet.has(tagId));
+    if (cleanTags.length !== area.tagIds.length) {
+      area.tagIds = cleanTags;
       repairedLinks += 1;
     }
   }

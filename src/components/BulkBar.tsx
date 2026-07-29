@@ -12,13 +12,14 @@ function plural(count: number): string {
 /** Appears when more than one row is selected, mirroring Things' batch actions. */
 export function BulkBar() {
   const selection = useStore((s) => s.selection);
+  const selectedList = useStore((s) => s.selectedList);
   const setWhen = useStore((s) => s.setWhen);
   const completeTodo = useStore((s) => s.completeTodo);
   const trashTodo = useStore((s) => s.trashTodo);
   const setMoveDialog = useStore((s) => s.setMoveDialog);
   const selectTodo = useStore((s) => s.selectTodo);
 
-  if (selection.length < 2) return null;
+  if (selection.length < 2 || selectedList === 'trash') return null;
 
   return (
     <div className="bulkbar" role="toolbar" aria-label="Действия над выбранными задачами">

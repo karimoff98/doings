@@ -65,6 +65,72 @@ describe('пакетные действия и отмена', () => {
     expect(store().db.projects.some((p) => p.id === projectId)).toBe(false);
     expect(store().selectedList).toBe('today');
   });
+
+  it('не открывает несуществующий или удалённый проект', () => {
+    store().selectList('project:missing');
+    expect(store().selectedList).toBe('today');
+
+    const id = store().createProject({ title: 'Удаляемый' });
+    store().trashProject(id);
+    store().selectList(`project:${id}`);
+    expect(store().selectedList).toBe('today');
+  });
+
+  it('закрывает редактор, если действие убрало задачу из текущего списка', () => {
+    const todo = store().db.todos.find(
+      (item) => item.status === 'open' && item.when.kind === 'today',
+    )!;
+    store().selectList('today');
+    store().openEditor(todo.id);
+    store().completeTodo(todo.id);
+
+    expect(store().editingTodoId).toBeUndefined();
+    expect(store().selectedTodoId).toBeUndefined();
+    expect(store().selection).toEqual([]);
+    expect(store().db.todos.some((item) => item.id === todo.id)).toBe(true);
+  });
+
+  it('после скрытия старой задачи создание новой не удаляет старую', () => {
+    const oldId = store().createTodo({ when: { kind: 'today' } });
+    store().setDeadline(oldId, today());
+    store().completeTodo(oldId);
+    store().createTodo({ title: 'Следующая' });
+
+    expect(store().db.todos.some((item) => item.id === oldId)).toBe(true);
+  });
+});
+
+describe('создание в отфильтрованном списке', () => {
+  it('наследует активный тег и не исчезает сразу после создания', () => {
+    const tag = store().db.tags[0];
+    store().selectList('today');
+    store().toggleTagFilter(tag.id);
+    const id = store().createTodo({ title: 'В фильтре' });
+
+    expect(store().db.todos.find((todo) => todo.id === id)?.tagIds).toContain(tag.id);
+    expect(
+      selectSections(store().db, 'today')
+        .flatMap((section) => section.rows)
+        .some((row) => row.kind === 'todo' && row.todo.id === id),
+    ).toBe(true);
+  });
+
+  it('закрывает редактор, если задача перестала подходить активному фильтру', () => {
+    const tag = store().db.tags[0];
+    const first = store().createTodo({ title: 'Первая', when: { kind: 'today' } });
+    const second = store().createTodo({ title: 'Вторая', when: { kind: 'today' } });
+    store().toggleTag(first, tag.id);
+    store().toggleTag(second, tag.id);
+    store().selectList('today');
+    store().toggleTagFilter(tag.id);
+    store().openEditor(first);
+
+    store().toggleTag(first, tag.id);
+
+    expect(store().editingTodoId).toBeUndefined();
+    expect(store().selection).toEqual([]);
+    expect(store().tagFilter).toEqual([tag.id]);
+  });
 });
 
 describe('повторяющиеся задачи', () => {
@@ -138,6 +204,32 @@ describe('создание и закрытие редактора', () => {
 
   it('задача с текстом сохраняется', () => {
     const id = store().createTodo({ title: 'Живая' });
+    store().closeEditor();
+
+    expect(store().db.todos.some((todo) => todo.id === id)).toBe(true);
+  });
+
+  it('новая задача с настроенным сроком не удаляется без заголовка', () => {
+    const id = store().createTodo();
+    store().setDeadline(id, today());
+    store().closeEditor();
+
+    expect(store().db.todos.find((todo) => todo.id === id)?.deadline).toBe(today());
+  });
+
+  it('новая задача с изменённой датой не считается нетронутой', () => {
+    const id = store().createTodo();
+    store().setWhen(id, { kind: 'someday' });
+    store().closeEditor();
+
+    expect(store().db.todos.find((todo) => todo.id === id)?.when.kind).toBe('someday');
+  });
+
+  it('существующая пустая задача не удаляется после просмотра', () => {
+    const id = store().createTodo({ title: 'Временное имя' });
+    store().closeEditor();
+    store().updateTodo(id, { title: '' });
+    store().openEditor(id);
     store().closeEditor();
 
     expect(store().db.todos.some((todo) => todo.id === id)).toBe(true);
@@ -444,9 +536,11 @@ describe('корзина и гидратация', () => {
   it('emptyTrash физически удаляет задачи и проекты', () => {
     const todo = store().db.todos.find((t) => t.status === 'open')!;
     const projectId = store().createProject({ title: 'На выброс' });
+    const headingId = store().createHeading(projectId, 'Тоже на выброс');
 
     store().trashTodo(todo.id);
     store().trashProject(projectId);
+    useStore.setState({ selection: [todo.id], selectedTodoId: todo.id });
     expect(store().db.todos.some((t) => t.id === todo.id && t.trashed)).toBe(true);
     expect(store().db.projects.some((p) => p.id === projectId && p.trashed)).toBe(true);
 
@@ -454,6 +548,39 @@ describe('корзина и гидратация', () => {
     // Gone from the arrays entirely, not just flagged.
     expect(store().db.todos.some((t) => t.id === todo.id)).toBe(false);
     expect(store().db.projects.some((p) => p.id === projectId)).toBe(false);
+    expect(store().db.headings.some((heading) => heading.id === headingId)).toBe(false);
+    expect(store().selection).toEqual([]);
+  });
+
+  it('действия над задачей в корзине не изменяют её скрытые свойства', () => {
+    const todo = store().db.todos.find((item) => item.status === 'open')!;
+    const checklistId = store().addChecklistItem(todo.id, { title: 'Сохранённый пункт' });
+    store().completeTodo(todo.id);
+    const before = structuredClone(store().db.todos.find((item) => item.id === todo.id)!);
+    store().trashTodo(todo.id);
+    useStore.setState({ editingTodoId: undefined, autoPanel: undefined });
+
+    store().setWhen(todo.id, { kind: 'someday' });
+    store().setDeadline(todo.id, today());
+    store().moveTodo(todo.id, {});
+    store().uncompleteTodo(todo.id);
+    store().addChecklistItem(todo.id, { title: 'Лишний пункт' });
+    store().updateChecklistItem(todo.id, checklistId, { title: 'Испорчено' });
+    store().removeChecklistItem(todo.id, checklistId);
+    store().openEditor(todo.id);
+    store().openEditorPanel(todo.id, 'tags');
+    expect(store().duplicateTodo(todo.id)).toEqual([]);
+
+    const after = store().db.todos.find((item) => item.id === todo.id);
+    expect(after?.when).toEqual(before.when);
+    expect(after?.deadline).toBe(before.deadline);
+    expect(after?.projectId).toBe(before.projectId);
+    expect(after?.areaId).toBe(before.areaId);
+    expect(after?.status).toBe('completed');
+    expect(after?.checklist).toEqual(before.checklist);
+    expect(after?.trashed).toBe(true);
+    expect(store().editingTodoId).toBeUndefined();
+    expect(store().autoPanel).toBeUndefined();
   });
 
   it('undo возвращает содержимое корзины, redo снова удаляет', () => {
@@ -530,12 +657,37 @@ describe('пустые проекты', () => {
     expect(store().draftProjectId).toBeUndefined();
   });
 
+  it('проект снова считается брошенным, если введённое название стёрли', () => {
+    const id = store().createProject();
+    store().updateProject(id, { title: 'Черновик' });
+    store().updateProject(id, { title: '' });
+    store().selectList('today');
+
+    expect(store().db.projects.some((project) => project.id === id)).toBe(false);
+  });
+
   it('пустой проект с задачей не удаляется при уходе', () => {
     const id = store().createProject();
     store().selectList(`project:${id}`);
     store().createTodo({ title: 'Есть дело', target: { projectId: id } });
     store().selectList('today');
     expect(store().db.projects.some((p) => p.id === id)).toBe(true);
+  });
+
+  it('проект без названия, но с заметкой не удаляется при уходе', () => {
+    const id = store().createProject();
+    store().updateProject(id, { notes: 'Важная заметка' });
+    store().selectList('today');
+
+    expect(store().db.projects.find((project) => project.id === id)?.notes).toBe('Важная заметка');
+  });
+
+  it('проект без названия, но со сроком не удаляется при уходе', () => {
+    const id = store().createProject();
+    store().updateProject(id, { deadline: today() });
+    store().selectList('today');
+
+    expect(store().db.projects.find((project) => project.id === id)?.deadline).toBe(today());
   });
 
   it('старый импортированный пустой проект не удаляется', () => {
@@ -580,6 +732,15 @@ describe('пустые области', () => {
     store().selectList('today');
     expect(store().db.areas.find((area) => area.id === id)?.title).toBe('Работа');
     expect(store().draftAreaId).toBeUndefined();
+  });
+
+  it('удаляет область, если введённое название полностью стёрли', () => {
+    const id = store().createArea();
+    store().updateArea(id, { title: 'Черновик' });
+    store().updateArea(id, { title: '' });
+    store().selectList('today');
+
+    expect(store().db.areas.some((area) => area.id === id)).toBe(false);
   });
 
   it('не удаляет пустую область, если в ней уже есть проект', () => {

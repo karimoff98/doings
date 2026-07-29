@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
 interface PopoverProps {
@@ -17,6 +17,30 @@ interface PopoverProps {
  */
 export function Popover({ open, onClose, children, align = 'left', up, width }: PopoverProps) {
   const panel = useRef<HTMLDivElement>(null);
+  const [autoUp, setAutoUp] = useState(false);
+  const [offsetX, setOffsetX] = useState(0);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const node = panel.current;
+    if (!node) return;
+    const box = node.getBoundingClientRect();
+    const anchorBox = node.parentElement?.getBoundingClientRect();
+    const margin = 8;
+    const spaceBelow = anchorBox ? window.innerHeight - anchorBox.bottom : window.innerHeight;
+    const spaceAbove = anchorBox?.top ?? 0;
+    setAutoUp(Boolean(!up && box.height > spaceBelow - margin && spaceAbove > spaceBelow));
+
+    const naturalLeft = box.left - offsetX;
+    const naturalRight = box.right - offsetX;
+    if (naturalRight > window.innerWidth - margin) {
+      setOffsetX(window.innerWidth - margin - naturalRight);
+    } else if (naturalLeft < margin) {
+      setOffsetX(margin - naturalLeft);
+    } else {
+      setOffsetX(0);
+    }
+  }, [open, up, children, offsetX]);
 
   useEffect(() => {
     if (!open) return;
@@ -50,12 +74,13 @@ export function Popover({ open, onClose, children, align = 'left', up, width }: 
       />
       <div
         ref={panel}
-        className={`popover${up ? ' popover--up' : ''}`}
+        className={`popover${up || autoUp ? ' popover--up' : ''}`}
         role="dialog"
         style={{
           left: align === 'left' ? 0 : undefined,
           right: align === 'right' ? 0 : undefined,
           minWidth: width,
+          marginLeft: offsetX,
         }}
         onClick={(event) => event.stopPropagation()}
         onMouseDown={(event) => event.stopPropagation()}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { shiftDay, today } from './dates';
-import { listCount, selectSections } from './lists';
+import { listCount, projectStats, selectSections } from './lists';
 import type { Database, ListKey, Project, Section, Todo } from './types';
 
 function todo(overrides: Partial<Todo> & { id: string }): Todo {
@@ -67,6 +67,25 @@ describe('Входящие', () => {
     });
     // Иначе такие задачи не видны нигде и считаются потерянными.
     expect(titles(db, 'inbox').sort()).toEqual(['без проекта вовсе', 'из корзины проекта']);
+  });
+});
+
+describe('статистика проектов', () => {
+  it('считает открытые, завершённые и удалённые задачи одним индексом', () => {
+    const db = database({
+      projects: [project({ id: 'проект' })],
+      todos: [
+        todo({ id: 'открытая', projectId: 'проект' }),
+        todo({ id: 'готовая', projectId: 'проект', status: 'completed' }),
+        todo({ id: 'в корзине', projectId: 'проект', trashed: true }),
+      ],
+    });
+
+    expect(projectStats(db).get('проект')).toEqual({
+      open: 1,
+      total: 2,
+      progress: 0.5,
+    });
   });
 });
 

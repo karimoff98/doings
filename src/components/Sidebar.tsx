@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { DragEvent, MouseEvent as ReactMouseEvent } from 'react';
-import { SMART_LIST_META, listCount, projectProgress, projectTitle } from '../domain/lists';
+import { SMART_LIST_META, listCount, projectStats, projectTitle } from '../domain/lists';
 import { comboLabel, shiftShortcutLabel } from '../domain/platform';
 import type { Area, ListKey, Project, SmartList } from '../domain/types';
 import { useStore } from '../store/store';
@@ -283,6 +283,7 @@ export function Sidebar() {
   );
   const looseProjects = useMemo(() => activeProjects.filter((p) => !p.areaId), [activeProjects]);
   const areas = useMemo(() => [...db.areas].sort((a, b) => a.index - b.index), [db.areas]);
+  const statsByProject = useMemo(() => projectStats(db), [db]);
 
   /** Places the dragged project next to `target`, moving it between areas if needed. */
   const dropProjectNear = (id: string, target: Project, after: boolean) => {
@@ -414,11 +415,11 @@ export function Sidebar() {
       {...projectDragProps(project)}
     >
       <span className="srow__icon">
-        <ProgressRing progress={projectProgress(db, project.id)} />
+        <ProgressRing progress={statsByProject.get(project.id)?.progress ?? 0} />
       </span>
       <span className="srow__title">{projectTitle(project)}</span>
-      {listCount(db, `project:${project.id}`) > 0 && (
-        <span className="srow__count">{listCount(db, `project:${project.id}`)}</span>
+      {(statsByProject.get(project.id)?.open ?? 0) > 0 && (
+        <span className="srow__count">{statsByProject.get(project.id)?.open}</span>
       )}
     </button>
   );

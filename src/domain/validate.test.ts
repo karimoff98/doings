@@ -83,10 +83,19 @@ describe('validateDatabase: починка данных', () => {
   it('чистит ссылки на то, чего нет', () => {
     const result = validateDatabase({
       ...empty,
-      areas: [{ id: 'area_1', title: 'Дом' }],
-      projects: [{ id: 'prj_1', title: 'Проект', areaId: 'нет такой области' }],
+      areas: [{ id: 'area_1', title: 'Дом', tagIds: ['нет такого тега'] }],
+      projects: [
+        {
+          id: 'prj_1',
+          title: 'Проект',
+          areaId: 'нет такой области',
+          tagIds: ['нет такого тега'],
+        },
+        { id: 'prj_2', title: 'Другой проект' },
+      ],
       headings: [
         { id: 'hd_1', projectId: 'prj_1', title: 'Раз' },
+        { id: 'hd_wrong', projectId: 'prj_2', title: 'Чужой' },
         { id: 'hd_2', projectId: 'нет такого проекта', title: 'Два' },
       ],
       todos: [
@@ -96,15 +105,19 @@ describe('validateDatabase: починка данных', () => {
           areaId: 'нет такой области',
           tagIds: ['нет такого тега'],
         },
+        { id: 'td_2', projectId: 'prj_1', headingId: 'hd_wrong' },
       ],
     });
 
-    expect(result!.db.headings.map((h) => h.id)).toEqual(['hd_1']);
+    expect(result!.db.headings.map((h) => h.id)).toEqual(['hd_1', 'hd_wrong']);
     expect(result!.db.projects[0].areaId).toBeUndefined();
     const todo = result!.db.todos[0];
     expect(todo.headingId).toBeUndefined();
     expect(todo.areaId).toBeUndefined();
     expect(todo.tagIds).toEqual([]);
+    expect(result!.db.todos[1].headingId).toBeUndefined();
+    expect(result!.db.projects[0].tagIds).toEqual([]);
+    expect(result!.db.areas[0].tagIds).toEqual([]);
     expect(result!.issues.join(' ')).toContain('битых ссылок');
   });
 

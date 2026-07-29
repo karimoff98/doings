@@ -62,6 +62,34 @@ button:focus-visible,
   overflow: hidden;
 }
 
+.app--loading {
+  display: grid;
+  place-items: center;
+}
+
+.load-failure {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+  max-width: 430px;
+  padding: 24px;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.load-failure strong {
+  color: var(--text-primary);
+}
+
+.load-failure button {
+  margin-top: 5px;
+  padding: 6px 12px;
+  border-radius: 7px;
+  background: var(--bg-chip);
+  color: var(--text-primary);
+}
+
 .app__content {
   position: relative;
   flex: 1;
@@ -74,6 +102,23 @@ button:focus-visible,
   max-width: var(--content-max);
   margin: 0 auto;
   padding: 34px 30px 220px;
+}
+
+.app__inner--enter {
+  animation: content-in 150ms var(--ease);
+}
+
+@keyframes content-in {
+  from {
+    opacity: 0.55;
+    transform: translateY(3px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app__inner--enter {
+    animation: none;
+  }
 }
 
 .visually-hidden {

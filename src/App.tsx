@@ -37,14 +37,22 @@ function useTheme() {
 /** Last resort in case hydration neither finishes nor reports an error. */
 const HYDRATION_TIMEOUT_MS = 4000;
 
-function useHydrated(): boolean {
+type HydrationState = 'loading' | 'ready' | 'timeout';
+
+function useHydrated(): HydrationState {
   const [hydrated, setHydrated] = useState(() => useStore.persist.hasHydrated());
+  const [timedOut, setTimedOut] = useState(false);
   const failed = useStore((s) => s.hydrationFailed);
 
   useEffect(() => {
     if (hydrated) return;
-    const stop = useStore.persist.onFinishHydration(() => setHydrated(true));
-    const timer = window.setTimeout(() => setHydrated(true), HYDRATION_TIMEOUT_MS);
+    const stop = useStore.persist.onFinishHydration(() => {
+      setHydrated(true);
+      setTimedOut(false);
+    });
+    // Never expose an editable empty database while the real file may still
+    // arrive and replace it. A stalled read gets a safe retry screen instead.
+    const timer = window.setTimeout(() => setTimedOut(true), HYDRATION_TIMEOUT_MS);
     return () => {
       stop();
       window.clearTimeout(timer);
@@ -57,7 +65,8 @@ function useHydrated(): boolean {
     if (hydrated || failed) window.desktop?.notifyReady?.();
   }, [hydrated, failed]);
 
-  return hydrated || failed;
+  if (hydrated || failed) return 'ready';
+  return timedOut ? 'timeout' : 'loading';
 }
 
 export function App() {
@@ -66,11 +75,24 @@ export function App() {
   useDesktopMenu();
   useDesktopSave();
   useReminders();
-  const hydrated = useHydrated();
+  const hydration = useHydrated();
   const storageError = useStore((s) => s.storageError);
   const hydrationFailed = useStore((s) => s.hydrationFailed);
 
-  if (!hydrated) return <div className="app app--loading" />;
+  if (hydration === 'loading') return <div className="app app--loading" />;
+  if (hydration === 'timeout') {
+    return (
+      <div className="app app--loading">
+        <div className="load-failure" role="alert">
+          <strong>База загружается слишком долго</strong>
+          <span>Изменения пока заблокированы, чтобы не перезаписать сохранённые данные.</span>
+          <button type="button" onClick={() => window.location.reload()}>
+            Попробовать снова
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // A problem with the database deserves the user's full attention: the
   // introduction must not cover the warning about it.

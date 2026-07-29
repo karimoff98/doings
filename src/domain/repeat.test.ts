@@ -41,6 +41,14 @@ describe('nextOccurrence', () => {
     expect(nextOccurrence(weekdays, '2026-03-16')).toBe('2026-03-17');
   });
 
+  it('после последнего дня пропускает неактивные недели интервала', () => {
+    const everyTwoWeeks = { unit: 'week' as const, every: 2, weekdays: [1, 3] };
+    // Среда 11 марта -> понедельник через одну пропущенную неделю.
+    expect(nextOccurrence(everyTwoWeeks, '2026-03-11')).toBe('2026-03-23');
+    // Внутри активной недели понедельник всё ещё переходит на среду.
+    expect(nextOccurrence(everyTwoWeeks, '2026-03-09')).toBe('2026-03-11');
+  });
+
   it('не зацикливается на интервале меньше единицы', () => {
     expect(nextOccurrence({ unit: 'day', every: 0 }, '2026-03-10')).toBe('2026-03-11');
   });

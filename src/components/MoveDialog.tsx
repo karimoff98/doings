@@ -61,9 +61,9 @@ export function MoveDialog() {
         }
       }
     }
-    for (const project of db.projects.filter(
-      (p) => !p.areaId && p.status === 'open' && !p.trashed,
-    )) {
+    for (const project of db.projects
+      .filter((p) => !p.areaId && p.status === 'open' && !p.trashed)
+      .sort((a, b) => a.index - b.index)) {
       items.push({
         key: `project:${project.id}`,
         title: projectTitle(project),
@@ -71,6 +71,17 @@ export function MoveDialog() {
         color: 'var(--c-project)',
         target: { projectId: project.id },
       });
+      for (const standaloneHeading of db.headings
+        .filter((item) => item.projectId === project.id)
+        .sort((a, b) => a.index - b.index)) {
+        items.push({
+          key: `heading:${standaloneHeading.id}`,
+          title: standaloneHeading.title,
+          sub: projectTitle(project),
+          icon: 'notes',
+          target: { projectId: project.id, headingId: standaloneHeading.id },
+        });
+      }
     }
     return items;
   }, [db]);

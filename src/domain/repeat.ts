@@ -39,12 +39,16 @@ export function nextOccurrence(rule: RepeatRule, from: IsoDay): IsoDay {
   const every = Math.max(1, Math.round(rule.every));
 
   if (rule.unit === 'week' && rule.weekdays?.length) {
-    const wanted = new Set(rule.weekdays);
-    for (let offset = 1; offset <= 7 * every + 7; offset += 1) {
-      const candidate = addDays(start, offset);
-      if (wanted.has(getISODay(candidate))) return toIsoDay(candidate);
+    const currentWeekday = getISODay(start);
+    const wanted = [...new Set(rule.weekdays)].sort((a, b) => a - b);
+    const laterThisWeek = wanted.find((weekday) => weekday > currentWeekday);
+    if (laterThisWeek !== undefined) {
+      return toIsoDay(addDays(start, laterThisWeek - currentWeekday));
     }
-    return toIsoDay(addWeeks(start, every));
+    // Once the active week's last chosen day is done, skip to the next active
+    // week. For "every 2 weeks" Wednesday -> Monday that is 12, not 5, days.
+    const first = wanted[0];
+    return toIsoDay(addDays(start, 7 * every - currentWeekday + first));
   }
 
   switch (rule.unit) {

@@ -446,3 +446,30 @@ export function projectProgress(db: Database, projectId: Id): number {
   const done = todos.filter((t) => t.status !== 'open').length;
   return done / todos.length;
 }
+
+export interface ProjectStats {
+  open: number;
+  total: number;
+  progress: number;
+}
+
+/** Calculates every project's counters in one pass instead of scanning all todos per row. */
+export function projectStats(db: Database): Map<Id, ProjectStats> {
+  const counts = new Map<Id, { open: number; total: number }>();
+  for (const todo of db.todos) {
+    if (!todo.projectId || todo.trashed) continue;
+    const current = counts.get(todo.projectId) ?? { open: 0, total: 0 };
+    current.total += 1;
+    if (todo.status === 'open') current.open += 1;
+    counts.set(todo.projectId, current);
+  }
+  return new Map(
+    [...counts].map(([id, count]) => [
+      id,
+      {
+        ...count,
+        progress: count.total ? (count.total - count.open) / count.total : 0,
+      },
+    ]),
+  );
+}

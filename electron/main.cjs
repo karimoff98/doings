@@ -13,8 +13,16 @@ let mainWindow = null;
 let quickWindow = null;
 
 function send(command) {
-  const target = BrowserWindow.getFocusedWindow() ?? mainWindow;
-  target?.webContents.send('menu:command', command);
+  const focused = BrowserWindow.getFocusedWindow();
+  // The Quick Entry window does not mount the React menu listener. Text-editing
+  // commands still have to operate on its input, while app commands belong to
+  // the main window.
+  if (focused === quickWindow) {
+    if (command === 'undo') return focused.webContents.undo();
+    if (command === 'redo') return focused.webContents.redo();
+    if (command === 'select-all') return focused.webContents.selectAll();
+  }
+  void deliverToMainWindow(command);
 }
 
 /** Set by the renderer once its command listener is mounted. */
@@ -22,6 +30,8 @@ let rendererReady = false;
 let waitingForRenderer = [];
 /** True once the pending changes are safely on disk (or the user insisted). */
 let quitApproved = false;
+/** Prevents repeated close/quit events from starting concurrent flush prompts. */
+let quitInProgress = false;
 const FLUSH_TIMEOUT_MS = 5000;
 
 /** Asks the renderer to write everything out; resolves with the outcome. */
@@ -41,7 +51,15 @@ function requestFlush(target) {
       FLUSH_TIMEOUT_MS,
     );
     ipcMain.on('storage:flushed', onFlushed);
-    target.webContents.send('storage:flush');
+    try {
+      if (target.isDestroyed() || target.webContents.isDestroyed()) {
+        finish({ ok: false, detail: 'Окно приложения уже закрыто.' });
+        return;
+      }
+      target.webContents.send('storage:flush');
+    } catch (error) {
+      finish({ ok: false, detail: `Не удалось запросить сохранение: ${String(error)}` });
+    }
   });
 }
 
@@ -50,6 +68,8 @@ function requestFlush(target) {
  * whether losing the last changes is acceptable.
  */
 async function flushThenQuit(target) {
+  if (quitInProgress) return;
+  quitInProgress = true;
   const result = await requestFlush(target);
   if (!result.ok) {
     const { response } = await dialog.showMessageBox(target, {
@@ -62,7 +82,10 @@ async function flushThenQuit(target) {
         `${result.detail ?? 'Запись на диск не удалась.'}\n\n` +
         'Можно отменить выход, сохранить копию базы через настройки и разобраться с причиной.',
     });
-    if (response === 1) return;
+    if (response === 1) {
+      quitInProgress = false;
+      return;
+    }
   }
   quitApproved = true;
   app.quit();
@@ -85,9 +108,8 @@ function whenRendererReady() {
 }
 
 /**
- * The single way to bring the app forward. On macOS the red button closes the
- * window but keeps the process running, so every entry point — relaunch from
- * Dock, Quick Entry, a reminder — has to be able to recreate it.
+ * The single way to bring the app forward. Every entry point — relaunch from
+ * Dock, Quick Entry, a reminder — goes through this function.
  */
 function revealMainWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) {
@@ -151,6 +173,26 @@ function createWindow() {
   mainWindow.webContents.on('will-navigate', (event, url) => {
     const allowed = DEV_SERVER_URL && url.startsWith(DEV_SERVER_URL);
     if (!allowed) event.preventDefault();
+  });
+
+  mainWindow.on('close', (event) => {
+    if (quitApproved) return;
+
+    if (isMac) {
+      // Keep the renderer alive when the red button is clicked. Its pending
+      // editor debounce and file write can then finish normally, and reopening
+      // the window does not need to rehydrate the whole database.
+      event.preventDefault();
+      mainWindow?.hide();
+      return;
+    }
+
+    // On Windows/Linux the last window means exit. Hold destruction back until
+    // open editors have committed and the database has reached the disk.
+    if (rendererReady && mainWindow) {
+      event.preventDefault();
+      void flushThenQuit(mainWindow);
+    }
   });
 
   mainWindow.on('closed', () => {
@@ -256,13 +298,28 @@ ipcMain.handle('storage:load', async () => {
     return await fs.readFile(file, 'utf8');
   } catch (error) {
     if (error.code !== 'ENOENT') console.error('Не удалось прочитать базу:', error);
-    // A half-written file would have been replaced by the backup below, but try
-    // it anyway as a last resort.
+    // A missing primary file can still have a usable backup after an interrupted
+    // filesystem operation. For every other read error the backup is a fallback,
+    // not proof that this is a new empty profile.
     try {
       return await fs.readFile(`${file}.bak`, 'utf8');
-    } catch {
-      return null;
+    } catch (backupError) {
+      if (error.code === 'ENOENT' && backupError.code === 'ENOENT') return null;
+      throw error.code === 'ENOENT' ? backupError : error;
     }
+  }
+});
+
+ipcMain.on('storage:reveal', async () => {
+  const file = databasePath();
+  try {
+    await fs.access(file);
+    shell.showItemInFolder(file);
+  } catch {
+    // Finder/Explorer cannot select a file that has not been created yet. The
+    // data directory is still useful for diagnosing a failed first save.
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await shell.openPath(path.dirname(file));
   }
 });
 
@@ -388,10 +445,6 @@ ipcMain.handle('app:info', () => ({
   platform: process.platform,
   packaged: app.isPackaged,
 }));
-
-ipcMain.on('storage:reveal', () => {
-  shell.showItemInFolder(databasePath());
-});
 
 ipcMain.handle('storage:path', () => databasePath());
 
