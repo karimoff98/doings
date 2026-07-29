@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.19",
   "type": "module",
-  "description": "Things 3 style task manager. Desktop app for macOS and Windows.",
+  "description": "Local-first task manager for macOS and Windows.",
   "license": "MIT",
   "author": "karimoff98",
   "repository": {
